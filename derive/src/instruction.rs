@@ -4,7 +4,9 @@ use syn::{
     parse_macro_input, FnArg, GenericArgument, Ident, ItemFn, Pat, PathArguments, ReturnType, Type,
 };
 
-use crate::helpers::{map_to_pod_type, zc_deserialize_expr, InstructionArgs};
+use crate::helpers::{
+    is_ix_dynamic_string, is_ix_dynamic_vec, map_to_pod_type, zc_deserialize_expr, InstructionArgs,
+};
 
 fn extract_result_ok_type(output: &ReturnType) -> Option<&Type> {
     if let ReturnType::Type(_, ty) = output {
@@ -93,14 +95,57 @@ pub(crate) fn instruction(attr: TokenStream, item: TokenStream) -> TokenStream {
             })
             .collect();
 
-        let zc_field_types: Vec<proc_macro2::TokenStream> =
-            remaining.iter().map(|pt| map_to_pod_type(&pt.ty)).collect();
+        enum IxDynKind {
+            Fixed,
+            Str { max: usize },
+            Vec { elem: Box<Type>, max: usize },
+        }
+
+        let kinds: Vec<IxDynKind> = remaining
+            .iter()
+            .map(|pt| {
+                if let Some(max) = is_ix_dynamic_string(&pt.ty) {
+                    IxDynKind::Str { max }
+                } else if let Some((elem, max)) = is_ix_dynamic_vec(&pt.ty) {
+                    IxDynKind::Vec { elem: Box::new(elem), max }
+                } else {
+                    IxDynKind::Fixed
+                }
+            })
+            .collect();
+
+        let has_dynamic = kinds.iter().any(|k| !matches!(k, IxDynKind::Fixed));
+
+        // Build ZC struct: fixed fields as Pod types + PodU16 descriptors for dynamic fields
+        let mut zc_field_names: Vec<Ident> = Vec::new();
+        let mut zc_field_types: Vec<proc_macro2::TokenStream> = Vec::new();
+
+        for (i, kind) in kinds.iter().enumerate() {
+            match kind {
+                IxDynKind::Fixed => {
+                    zc_field_names.push(field_names[i].clone());
+                    zc_field_types.push(map_to_pod_type(&remaining[i].ty));
+                }
+                IxDynKind::Str { .. } => {
+                    let len_name =
+                        Ident::new(&format!("{}_len", field_names[i]), field_names[i].span());
+                    zc_field_names.push(len_name);
+                    zc_field_types.push(quote! { quasar_core::pod::PodU16 });
+                }
+                IxDynKind::Vec { .. } => {
+                    let count_name =
+                        Ident::new(&format!("{}_count", field_names[i]), field_names[i].span());
+                    zc_field_names.push(count_name);
+                    zc_field_types.push(quote! { quasar_core::pod::PodU16 });
+                }
+            }
+        }
 
         new_stmts.push(syn::parse_quote!(
             #[repr(C)]
             #[derive(Copy, Clone)]
             struct InstructionDataZc {
-                #(#field_names: #zc_field_types,)*
+                #(#zc_field_names: #zc_field_types,)*
             }
         ));
 
@@ -121,10 +166,105 @@ pub(crate) fn instruction(attr: TokenStream, item: TokenStream) -> TokenStream {
             let __zc = unsafe { &*(#param_ident.data.as_ptr() as *const InstructionDataZc) };
         ));
 
-        for (i, name) in field_names.iter().enumerate() {
-            let expr = zc_deserialize_expr(name, &remaining[i].ty);
+        // Extract fixed fields from ZC header
+        for (i, kind) in kinds.iter().enumerate() {
+            if matches!(kind, IxDynKind::Fixed) {
+                let name = &field_names[i];
+                let expr = zc_deserialize_expr(name, &remaining[i].ty);
+                new_stmts.push(syn::parse_quote!(
+                    let #name = #expr;
+                ));
+            }
+        }
+
+        // Extract dynamic fields from variable tail
+        if has_dynamic {
             new_stmts.push(syn::parse_quote!(
-                let #name = #expr;
+                let __tail = &#param_ident.data[core::mem::size_of::<InstructionDataZc>()..];
+            ));
+            new_stmts.push(syn::parse_quote!(
+                let mut __offset: usize = 0;
+            ));
+
+            // Count dynamic fields to avoid unused offset update on last one
+            let dyn_count = kinds
+                .iter()
+                .filter(|k| !matches!(k, IxDynKind::Fixed))
+                .count();
+            let mut dyn_idx = 0usize;
+
+            for (i, kind) in kinds.iter().enumerate() {
+                let name = &field_names[i];
+                match kind {
+                    IxDynKind::Fixed => {}
+                    IxDynKind::Str { max } => {
+                        dyn_idx += 1;
+                        let len_name = Ident::new(&format!("{}_len", name), name.span());
+                        let max_lit = *max;
+                        new_stmts.push(syn::parse_quote!(
+                            let __dyn_len = __zc.#len_name.get() as usize;
+                        ));
+                        new_stmts.push(syn::parse_quote!(
+                            if __dyn_len > #max_lit {
+                                return Err(ProgramError::InvalidInstructionData);
+                            }
+                        ));
+                        new_stmts.push(syn::parse_quote!(
+                            if __tail.len() < __offset + __dyn_len {
+                                return Err(ProgramError::InvalidInstructionData);
+                            }
+                        ));
+                        new_stmts.push(syn::parse_quote!(
+                            let #name: &str = core::str::from_utf8(
+                                &__tail[__offset..__offset + __dyn_len]
+                            ).map_err(|_| ProgramError::InvalidInstructionData)?;
+                        ));
+                        if dyn_idx < dyn_count {
+                            new_stmts.push(syn::parse_quote!(
+                                __offset += __dyn_len;
+                            ));
+                        }
+                    }
+                    IxDynKind::Vec { elem, max } => {
+                        dyn_idx += 1;
+                        let count_name = Ident::new(&format!("{}_count", name), name.span());
+                        let max_lit = *max;
+                        new_stmts.push(syn::parse_quote!(
+                            let __dyn_count = __zc.#count_name.get() as usize;
+                        ));
+                        new_stmts.push(syn::parse_quote!(
+                            if __dyn_count > #max_lit {
+                                return Err(ProgramError::InvalidInstructionData);
+                            }
+                        ));
+                        new_stmts.push(syn::parse_quote!(
+                            let __dyn_byte_len = __dyn_count * core::mem::size_of::<#elem>();
+                        ));
+                        new_stmts.push(syn::parse_quote!(
+                            if __tail.len() < __offset + __dyn_byte_len {
+                                return Err(ProgramError::InvalidInstructionData);
+                            }
+                        ));
+                        new_stmts.push(syn::parse_quote!(
+                            let #name: &[#elem] = unsafe {
+                                core::slice::from_raw_parts(
+                                    __tail.as_ptr().add(__offset) as *const #elem,
+                                    __dyn_count,
+                                )
+                            };
+                        ));
+                        if dyn_idx < dyn_count {
+                            new_stmts.push(syn::parse_quote!(
+                                __offset += __dyn_byte_len;
+                            ));
+                        }
+                    }
+                }
+            }
+
+            // Suppress unused warning on __offset after last dynamic field
+            new_stmts.push(syn::parse_quote!(
+                let _ = __offset;
             ));
         }
     }

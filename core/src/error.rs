@@ -16,4 +16,5 @@ pub enum QuasarError {
     AccountNotMutable,
     AccountNotSigner,
     AddressMismatch,
+    DynamicFieldTooLong,
 }
