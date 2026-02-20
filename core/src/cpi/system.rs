@@ -18,12 +18,11 @@ pub fn create_account<'a>(
     owner: &'a Address,
 ) -> CpiCall<'a, 2, 52> {
     let lamports: u64 = lamports.into();
-    // SAFETY: All 52 bytes are written before assume_init. The u32 write at offset 0
-    // is technically misaligned (buf has align 1), but SBF handles unaligned access natively.
+    // SAFETY: All 52 bytes are written before assume_init.
     let data = unsafe {
         let mut buf = core::mem::MaybeUninit::<[u8; 52]>::uninit();
         let ptr = buf.as_mut_ptr() as *mut u8;
-        core::ptr::write(ptr as *mut u32, 0u32);
+        core::ptr::copy_nonoverlapping(0u32.to_le_bytes().as_ptr(), ptr, 4);
         core::ptr::copy_nonoverlapping(lamports.to_le_bytes().as_ptr(), ptr.add(4), 8);
         core::ptr::copy_nonoverlapping(space.to_le_bytes().as_ptr(), ptr.add(12), 8);
         core::ptr::copy_nonoverlapping(owner.as_ref().as_ptr(), ptr.add(20), 32);
@@ -99,12 +98,11 @@ impl SystemProgram {
         let to = to.to_account_view();
         let lamports: u64 = lamports.into();
 
-        // SAFETY: All 52 bytes are written before assume_init. The u32 write at offset 0
-        // is technically misaligned (buf has align 1), but SBF handles unaligned access natively.
+        // SAFETY: All 52 bytes are written before assume_init.
         let data = unsafe {
             let mut buf = core::mem::MaybeUninit::<[u8; 52]>::uninit();
             let ptr = buf.as_mut_ptr() as *mut u8;
-            core::ptr::write(ptr as *mut u32, 0u32);
+            core::ptr::copy_nonoverlapping(0u32.to_le_bytes().as_ptr(), ptr, 4);
             core::ptr::copy_nonoverlapping(lamports.to_le_bytes().as_ptr(), ptr.add(4), 8);
             core::ptr::copy_nonoverlapping(space.to_le_bytes().as_ptr(), ptr.add(12), 8);
             core::ptr::copy_nonoverlapping(owner.as_ref().as_ptr(), ptr.add(20), 32);

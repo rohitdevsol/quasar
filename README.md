@@ -7,7 +7,9 @@
 
 ## Overview
 
-Quasar is a `no_std` Solana program framework that brings everything the ecosystem has learned about CU optimization — from hand-written Pinocchio programs to zero-copy tricks — into a declarative macro system with Anchor-level developer experience. It provides `#[account]`, `#[derive(Accounts)]`, `#[instruction]`, `#[program]`, `#[event]` — but the generated code is zero-copy and zero-allocation, operating directly on the SVM input buffer with no deserialization step.
+Quasar is a `no_std` Solana program framework that brings everything the ecosystem has learned about CU optimization — from [Pinocchio](https://github.com/anza-xyz/pinocchio/blob/main/README.md) programs to zero-copy tricks — into a declarative macro system with Anchor-level developer experience. 
+
+It provides `#[account]`, `#[derive(Accounts)]`, `#[instruction]`, `#[program]`, `#[event]` — but the generated code is zero-copy and zero-allocation, operating directly on the SVM input buffer with no deserialization step.
 
 The framework is a workspace of four crates:
 
@@ -185,6 +187,11 @@ cargo clippy --workspace -- -D warnings
 
 # Generate IDL
 cargo run -p quasar-idl
+
+# Run Miri UB tests (requires nightly)
+rustup +nightly component add miri
+MIRIFLAGS="-Zmiri-tree-borrows -Zmiri-symbolic-alignment-check" \
+  cargo +nightly miri test -p quasar-core --test miri
 ```
 
 The `examples/escrow/` directory contains the full reference implementation used for CU benchmarking. `examples/pinocchio-escrow/` contains the hand-written Pinocchio equivalent for comparison.
