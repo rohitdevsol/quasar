@@ -38,6 +38,14 @@
 //! | CPI `create_account` data construction | Sound (was misaligned u32, fixed) |
 //! | Boundary pointer subtraction (`data.as_ptr().sub(8)`) | Sound |
 //! | Remaining accounts alignment rounding | **Provenance warning** — integer-to-pointer cast strips provenance. Fails under `-Zmiri-strict-provenance`. Not UB under default provenance model. |
+//! | Dynamic ZC header cast + PodU16 descriptor read | Sound |
+//! | `from_utf8_unchecked` on account data String fields | Sound |
+//! | `slice::from_raw_parts` for Vec field access | Sound |
+//! | `ptr::copy` (memmove) for shifting subsequent dynamic fields | Sound |
+//! | `slice::from_raw_parts_mut` for Vec in-place mutation | Sound |
+//! | `copy_nonoverlapping` for Vec data writes | Sound |
+//! | Stack buffer batch write (`set_dynamic_fields` pattern) | Sound |
+//! | Instruction data ZC cast + variable tail parsing | Sound |
 //!
 //! ## What Miri CANNOT test
 //!
@@ -1629,4 +1637,588 @@ fn sysvar_get_maybeuninit_write_bytes_assume_init() {
 
     // Zero-initialized Rent: lamports_per_byte=0, exemption_threshold=[0;8]
     assert_eq!(rent.minimum_balance_unchecked(100), 0);
+}
+
+// ===========================================================================
+// 19. Dynamic account fields — tight-buffer boundary probes
+//
+// The #[account] macro generates code for dynamic fields (String/Vec) that:
+//   1. Casts account data to a ZC companion struct with PodU16 descriptors
+//   2. Reads descriptor values to compute offsets into a variable tail
+//   3. Creates &str via from_utf8_unchecked or &[T] via slice::from_raw_parts
+//
+// These tests use EXACT-SIZE buffers so any off-by-one in pointer arithmetic
+// hits the allocation boundary. They probe for UB, not correctness.
+// ===========================================================================
+
+/// Simulated ZC companion struct for a dynamic account:
+///   fixed: Address (32 bytes)
+///   name_len: PodU16
+///   tags_count: PodU16
+///   [tail: name bytes | tag elements (Address)]
+#[repr(C)]
+#[derive(Copy, Clone)]
+struct DynTestZc {
+    fixed: [u8; 32],
+    name_len: PodU16,
+    tags_count: PodU16,
+}
+
+const _: () = assert!(align_of::<DynTestZc>() == 1);
+const _: () = assert!(size_of::<DynTestZc>() == 36);
+
+const DYN_DISC_LEN: usize = 1;
+const DYN_HEADER_SIZE: usize = DYN_DISC_LEN + size_of::<DynTestZc>();
+
+/// Build a dynamic account buffer with EXACT allocation — no slack beyond
+/// RuntimeAccount header + data. Any off-by-one in pointer arithmetic
+/// touches the allocation edge and Miri flags it.
+fn make_dyn_buffer_exact(name: &[u8], tags: &[[u8; 32]]) -> AccountBuffer {
+    let tail_size = name.len() + tags.len() * 32;
+    let data_len = DYN_HEADER_SIZE + tail_size;
+    // Exact: RuntimeAccount + data_len + MAX_PERMITTED_DATA_INCREASE + u64
+    // (standard AccountBuffer::new). We use ::new here because the SVM always
+    // provides MAX_PERMITTED_DATA_INCREASE slack, but the data_len field is
+    // exact — pointer arithmetic that reads beyond data_len is caught.
+    let mut buf = AccountBuffer::new(data_len);
+    buf.init(
+        [1u8; 32],
+        TEST_OWNER.to_bytes(),
+        1_000_000,
+        data_len as u64,
+        false,
+        true,
+    );
+
+    let mut data = vec![0u8; data_len];
+    data[0] = 0x05;
+    data[DYN_DISC_LEN..DYN_DISC_LEN + 32].copy_from_slice(&[0xAA; 32]);
+    let name_len_offset = DYN_DISC_LEN + 32;
+    data[name_len_offset..name_len_offset + 2]
+        .copy_from_slice(&(name.len() as u16).to_le_bytes());
+    let tags_count_offset = name_len_offset + 2;
+    data[tags_count_offset..tags_count_offset + 2]
+        .copy_from_slice(&(tags.len() as u16).to_le_bytes());
+    let tail_start = DYN_HEADER_SIZE;
+    data[tail_start..tail_start + name.len()].copy_from_slice(name);
+    let tags_start = tail_start + name.len();
+    for (i, tag) in tags.iter().enumerate() {
+        data[tags_start + i * 32..tags_start + (i + 1) * 32].copy_from_slice(tag);
+    }
+
+    buf.write_data(&data);
+    buf
+}
+
+#[test]
+fn dynamic_zc_cast_max_capacity_name_touches_allocation_edge() {
+    // Probe: name fills all 32 MAX bytes. The from_utf8_unchecked slice
+    // end touches the LAST byte of account data. If the ZC cast or offset
+    // arithmetic is off by 1, this reads beyond the allocation.
+    let max_name = [b'x'; 32]; // 32 bytes = MAX
+    let mut buf = make_dyn_buffer_exact(&max_name, &[]);
+    let view = unsafe { buf.view() };
+    let data = unsafe { view.borrow_unchecked() };
+
+    // The slice [DYN_HEADER_SIZE..DYN_HEADER_SIZE+32] must be exactly at
+    // the end of the data region.
+    assert_eq!(data.len(), DYN_HEADER_SIZE + 32);
+
+    let zc = unsafe { &*(data[DYN_DISC_LEN..].as_ptr() as *const DynTestZc) };
+    let offset = DYN_HEADER_SIZE;
+    let len = zc.name_len.get() as usize;
+    assert_eq!(len, 32);
+    assert_eq!(offset + len, data.len()); // touches last byte
+
+    let s = unsafe { core::str::from_utf8_unchecked(&data[offset..offset + len]) };
+    assert_eq!(s.len(), 32);
+}
+
+#[test]
+fn dynamic_from_raw_parts_max_tags_touches_allocation_edge() {
+    // Probe: 10 tags (MAX). The from_raw_parts slice end is the LAST byte
+    // of account data. Off-by-one in count or offset → out of bounds.
+    let tags: Vec<[u8; 32]> = (0..10).map(|i| [i as u8; 32]).collect();
+    let mut buf = make_dyn_buffer_exact(b"", &tags);
+    let view = unsafe { buf.view() };
+    let data = unsafe { view.borrow_unchecked() };
+
+    assert_eq!(data.len(), DYN_HEADER_SIZE + 320); // 37 + 10*32
+
+    let zc = unsafe { &*(data[DYN_DISC_LEN..].as_ptr() as *const DynTestZc) };
+    let offset = DYN_HEADER_SIZE;
+    let count = zc.tags_count.get() as usize;
+    assert_eq!(count, 10);
+    assert_eq!(offset + count * 32, data.len()); // touches last byte
+
+    let slice: &[Address] =
+        unsafe { core::slice::from_raw_parts(data[offset..].as_ptr() as *const Address, count) };
+
+    // Read last element — touches bytes [data.len()-32..data.len()]
+    assert_eq!(slice[9].as_array(), &[9u8; 32]);
+}
+
+#[test]
+fn dynamic_header_only_no_tail() {
+    // Edge case: both fields empty. data_len == DYN_HEADER_SIZE exactly.
+    // ZC cast must not read beyond header. from_raw_parts with count=0
+    // and from_utf8_unchecked with len=0 must not read any tail bytes.
+    let mut buf = make_dyn_buffer_exact(b"", &[]);
+    let view = unsafe { buf.view() };
+    let data = unsafe { view.borrow_unchecked() };
+
+    assert_eq!(data.len(), DYN_HEADER_SIZE); // no tail at all
+
+    let zc = unsafe { &*(data[DYN_DISC_LEN..].as_ptr() as *const DynTestZc) };
+    assert_eq!(zc.name_len.get(), 0);
+    assert_eq!(zc.tags_count.get(), 0);
+
+    // Zero-length slices at the exact end of the allocation
+    let offset = DYN_HEADER_SIZE;
+    let s = unsafe { core::str::from_utf8_unchecked(&data[offset..offset]) };
+    assert_eq!(s, "");
+
+    let slice: &[Address] =
+        unsafe { core::slice::from_raw_parts(data[offset..].as_ptr() as *const Address, 0) };
+    assert_eq!(slice.len(), 0);
+}
+
+// ===========================================================================
+// 20. Dynamic fields — aliasing between shared ZC read and mutable write
+//
+// The setter pattern does:
+//   1. borrow_unchecked() → cast to &DynTestZc (shared) → read descriptors
+//   2. Drop the shared borrow
+//   3. borrow_unchecked_mut() → write data → cast to &mut DynTestZc (mutable)
+//
+// Under Tree Borrows, step 3 creates a new mutable child from the same raw
+// pointer. If the shared &DynTestZc from step 1 is still "active" in the
+// borrow tree, the retag to &mut could be UB. These tests probe that boundary.
+// ===========================================================================
+
+#[test]
+fn dynamic_setter_aliasing_shared_read_then_mut_write() {
+    // Probe: read ZC header through shared borrow, compute offset,
+    // drop shared borrow, then write through mutable borrow to the same
+    // underlying AccountView. The codegen does this in every individual setter.
+    let name = b"old";
+    let mut buf = make_dyn_buffer_exact(name, &[]);
+    let view = unsafe { buf.view() };
+
+    // Step 1: shared borrow → read ZC header → compute offset
+    let old_name_len;
+    let field_offset;
+    {
+        let data = unsafe { view.borrow_unchecked() };
+        let zc = unsafe { &*(data[DYN_DISC_LEN..].as_ptr() as *const DynTestZc) };
+        old_name_len = zc.name_len.get() as usize;
+        field_offset = DYN_HEADER_SIZE;
+    }
+    // shared borrow dropped
+
+    // Step 2: mutable borrow → write new data + update ZC header
+    // Same new_name length — no realloc needed, just overwrite
+    let new_name = b"NEW";
+    assert_eq!(new_name.len(), old_name_len); // same size, no realloc
+
+    let data = unsafe { view.borrow_unchecked_mut() };
+    data[field_offset..field_offset + new_name.len()].copy_from_slice(new_name);
+
+    // Also cast to &mut DynTestZc to update descriptor (same memory as step 1's &DynTestZc)
+    let zc = unsafe { &mut *(data[DYN_DISC_LEN..].as_mut_ptr() as *mut DynTestZc) };
+    zc.name_len = PodU16::from(new_name.len() as u16);
+
+    // Step 3: shared borrow again to verify
+    let data = unsafe { view.borrow_unchecked() };
+    let s = unsafe { core::str::from_utf8_unchecked(&data[field_offset..field_offset + 3]) };
+    assert_eq!(s, "NEW");
+}
+
+#[test]
+fn dynamic_setter_interleaved_shared_mut_shared() {
+    // Probe: shared → mut → shared → mut — interleaved borrows on the same view.
+    // Each mut creates a new &mut DynTestZc. If Tree Borrows retags invalidate
+    // the parent's permission, subsequent shared reads would fail.
+    let name = b"AB";
+    let tags = [[0xCC; 32]];
+    let mut buf = make_dyn_buffer_exact(name, &tags);
+    let view = unsafe { buf.view() };
+
+    // Shared read 1
+    {
+        let data = unsafe { view.borrow_unchecked() };
+        let zc = unsafe { &*(data[DYN_DISC_LEN..].as_ptr() as *const DynTestZc) };
+        assert_eq!(zc.name_len.get(), 2);
+        assert_eq!(zc.tags_count.get(), 1);
+    }
+
+    // Mut write 1: overwrite name bytes in place
+    {
+        let data = unsafe { view.borrow_unchecked_mut() };
+        data[DYN_HEADER_SIZE] = b'X';
+        data[DYN_HEADER_SIZE + 1] = b'Y';
+    }
+
+    // Shared read 2: see mut write 1
+    {
+        let data = unsafe { view.borrow_unchecked() };
+        let s = unsafe { core::str::from_utf8_unchecked(&data[DYN_HEADER_SIZE..DYN_HEADER_SIZE + 2]) };
+        assert_eq!(s, "XY");
+    }
+
+    // Mut write 2: update ZC descriptor
+    {
+        let data = unsafe { view.borrow_unchecked_mut() };
+        let zc = unsafe { &mut *(data[DYN_DISC_LEN..].as_mut_ptr() as *mut DynTestZc) };
+        zc.name_len = PodU16::from(2u16); // unchanged but exercises the &mut cast
+    }
+
+    // Shared read 3: still consistent
+    {
+        let data = unsafe { view.borrow_unchecked() };
+        let zc = unsafe { &*(data[DYN_DISC_LEN..].as_ptr() as *const DynTestZc) };
+        assert_eq!(zc.name_len.get(), 2);
+        let tags_offset = DYN_HEADER_SIZE + 2;
+        let tag: &[u8; 32] = data[tags_offset..tags_offset + 32].try_into().unwrap();
+        assert_eq!(tag, &[0xCC; 32]); // tags survived name writes
+    }
+}
+
+// ===========================================================================
+// 21. Dynamic fields — minimum overlap memmove
+//
+// The grow/shrink tests must exercise the smallest possible overlap geometry.
+// A 1-byte grow with a 1-byte tail means source and destination share bytes.
+// This is the case most likely to expose memmove bugs.
+// ===========================================================================
+
+#[test]
+fn dynamic_memmove_1byte_grow_1byte_tail() {
+    // Initial: name="A" (1 byte), tail after name = 1 byte (0xEE).
+    // Grow name to "AB" (2 bytes). The 1-byte tail at offset DYN_HEADER_SIZE+1
+    // must shift to DYN_HEADER_SIZE+2. Source [H+1..H+2] overlaps with
+    // dest [H+2..H+3] by 0 bytes (adjacent) — but the ptr::copy call
+    // operates on the full borrow_unchecked_mut slice, so Miri checks
+    // provenance across the entire region.
+    let data_len = DYN_HEADER_SIZE + 2; // 1 byte name + 1 byte "tail"
+    let mut buf = AccountBuffer::new(data_len);
+    buf.init([1u8; 32], TEST_OWNER.to_bytes(), 1_000_000, data_len as u64, false, true);
+    let mut data = vec![0u8; data_len];
+    data[0] = 0x05;
+    data[DYN_DISC_LEN..DYN_DISC_LEN + 32].copy_from_slice(&[0xAA; 32]);
+    data[DYN_DISC_LEN + 32..DYN_DISC_LEN + 34].copy_from_slice(&1u16.to_le_bytes()); // name_len=1
+    data[DYN_DISC_LEN + 34..DYN_DISC_LEN + 36].copy_from_slice(&0u16.to_le_bytes()); // tags_count=0
+    data[DYN_HEADER_SIZE] = b'A';
+    data[DYN_HEADER_SIZE + 1] = 0xEE; // simulated tail byte
+    buf.write_data(&data);
+
+    let view = unsafe { buf.view() };
+
+    // Grow by 1 byte
+    view.resize(data_len + 1).unwrap();
+    let data = unsafe { view.borrow_unchecked_mut() };
+
+    // Memmove: shift tail 1 byte forward — source and dest are adjacent
+    let old_end = DYN_HEADER_SIZE + 1;
+    let new_end = DYN_HEADER_SIZE + 2;
+    unsafe {
+        core::ptr::copy(
+            data.as_ptr().add(old_end),
+            data.as_mut_ptr().add(new_end),
+            1, // 1-byte tail
+        );
+    }
+    data[DYN_HEADER_SIZE] = b'A';
+    data[DYN_HEADER_SIZE + 1] = b'B';
+
+    assert_eq!(data[new_end], 0xEE); // tail preserved
+}
+
+#[test]
+fn dynamic_memmove_1byte_shrink_overlapping() {
+    // Initial: name="AB" (2 bytes), 1-byte tail (0xFF).
+    // Shrink name to "A" (1 byte). Tail shifts backward from H+2 to H+1.
+    // Source region [H+2..H+3] and dest [H+1..H+2] overlap by 0 bytes
+    // (adjacent), but the dangerous case is when they DO overlap:
+    // use a 2-byte tail so src [H+2..H+4] and dst [H+1..H+3] overlap by 1.
+    let data_len = DYN_HEADER_SIZE + 4; // 2 byte name + 2 byte tail
+    let mut buf = AccountBuffer::new(data_len);
+    buf.init([1u8; 32], TEST_OWNER.to_bytes(), 1_000_000, data_len as u64, false, true);
+    let mut data = vec![0u8; data_len];
+    data[0] = 0x05;
+    data[DYN_DISC_LEN..DYN_DISC_LEN + 32].copy_from_slice(&[0xAA; 32]);
+    data[DYN_DISC_LEN + 32..DYN_DISC_LEN + 34].copy_from_slice(&2u16.to_le_bytes());
+    data[DYN_DISC_LEN + 34..DYN_DISC_LEN + 36].copy_from_slice(&0u16.to_le_bytes());
+    data[DYN_HEADER_SIZE] = b'A';
+    data[DYN_HEADER_SIZE + 1] = b'B';
+    data[DYN_HEADER_SIZE + 2] = 0xDD;
+    data[DYN_HEADER_SIZE + 3] = 0xEE;
+    buf.write_data(&data);
+
+    let view = unsafe { buf.view() };
+    let data = unsafe { view.borrow_unchecked_mut() };
+
+    // Memmove backward: src [H+2..H+4] → dst [H+1..H+3]. 1 byte overlap.
+    let old_end = DYN_HEADER_SIZE + 2;
+    let new_end = DYN_HEADER_SIZE + 1;
+    unsafe {
+        core::ptr::copy(
+            data.as_ptr().add(old_end),
+            data.as_mut_ptr().add(new_end),
+            2, // 2-byte tail
+        );
+    }
+
+    data[DYN_HEADER_SIZE] = b'A'; // new 1-byte name
+
+    assert_eq!(data[DYN_HEADER_SIZE + 1], 0xDD);
+    assert_eq!(data[DYN_HEADER_SIZE + 2], 0xEE);
+
+    // Shrink
+    view.resize(DYN_HEADER_SIZE + 3).unwrap();
+    assert_eq!(view.data_len(), DYN_HEADER_SIZE + 3);
+}
+
+// ===========================================================================
+// 22. Dynamic fields — batch write with aliased shared→mut on same view
+//
+// set_dynamic_fields() reads the ZC header through a shared borrow
+// (borrow_unchecked), copies old data into the stack buffer, THEN writes
+// back through borrow_unchecked_mut. The shared and mutable paths go through
+// the same raw pointer in AccountView. Under Tree Borrows, the retag from
+// shared to mutable could invalidate the parent tag.
+// ===========================================================================
+
+#[test]
+fn dynamic_batch_write_shared_read_then_mut_write_same_view() {
+    // Probe the exact aliasing pattern from set_dynamic_fields():
+    //   1. borrow_unchecked() → cast &DynTestZc → read old data into stack buf
+    //   2. borrow_unchecked_mut() → copy_from_slice from stack buf → cast &mut DynTestZc
+    let name = b"hello";
+    let tags = [[0xDD; 32]];
+    let mut buf = make_dyn_buffer_exact(name, &tags);
+    let view = unsafe { buf.view() };
+
+    // Step 1: shared borrow — read old data into stack buffer
+    const MAX_TAIL: usize = 32 + 10 * 32;
+    let mut stack_buf = [0u8; MAX_TAIL];
+    let mut buf_offset = 0usize;
+
+    // Read from shared borrow (this is the &DynTestZc that might alias)
+    {
+        let data = unsafe { view.borrow_unchecked() };
+        let zc = unsafe { &*(data[DYN_DISC_LEN..].as_ptr() as *const DynTestZc) };
+
+        let mut old_offset = DYN_HEADER_SIZE;
+
+        // Name: Some("hi") — new value
+        let new_name = b"hi";
+        stack_buf[buf_offset..buf_offset + 2].copy_from_slice(new_name);
+        buf_offset += 2;
+        old_offset += zc.name_len.get() as usize;
+
+        // Tags: None — preserve old data from shared borrow
+        let old_count = zc.tags_count.get() as usize;
+        let old_bytes = old_count * 32;
+        stack_buf[buf_offset..buf_offset + old_bytes]
+            .copy_from_slice(&data[old_offset..old_offset + old_bytes]);
+        buf_offset += old_bytes;
+    }
+    // shared borrow dropped — but under Tree Borrows, does the raw pointer
+    // in AccountView retain its permissions for the mutable retag below?
+
+    // Step 2: mutable borrow — write back from stack buffer
+    let new_total = DYN_HEADER_SIZE + buf_offset;
+    if new_total < view.data_len() {
+        // Need to write BEFORE shrinking
+        let data = unsafe { view.borrow_unchecked_mut() };
+        data[DYN_HEADER_SIZE..DYN_HEADER_SIZE + buf_offset]
+            .copy_from_slice(&stack_buf[..buf_offset]);
+
+        // Cast to &mut DynTestZc — same memory address as step 1's &DynTestZc
+        let zc = unsafe { &mut *(data[DYN_DISC_LEN..].as_mut_ptr() as *mut DynTestZc) };
+        zc.name_len = PodU16::from(2u16);
+        // tags_count unchanged
+    }
+
+    view.resize(new_total).unwrap();
+
+    // Verify through a fresh shared borrow
+    let data = unsafe { view.borrow_unchecked() };
+    let zc = unsafe { &*(data[DYN_DISC_LEN..].as_ptr() as *const DynTestZc) };
+    assert_eq!(zc.name_len.get(), 2);
+    assert_eq!(zc.tags_count.get(), 1);
+
+    let s = unsafe { core::str::from_utf8_unchecked(&data[DYN_HEADER_SIZE..DYN_HEADER_SIZE + 2]) };
+    assert_eq!(s, "hi");
+
+    let tags_offset = DYN_HEADER_SIZE + 2;
+    let tag: &[u8; 32] = data[tags_offset..tags_offset + 32].try_into().unwrap();
+    assert_eq!(tag, &[0xDD; 32]);
+}
+
+// ===========================================================================
+// 23. Dynamic fields — from_raw_parts_mut + write + from_raw_parts read
+//
+// tags_mut() creates &mut [Address] via from_raw_parts_mut. A write through
+// this &mut slice, followed by a fresh from_raw_parts read, exercises the
+// retag sequence. The &mut from step 1 is invalidated by step 2's shared
+// retag. Under Tree Borrows, writing through &mut to account data then
+// reading through a separate &[u8] from borrow_unchecked must be sound.
+// ===========================================================================
+
+#[test]
+fn dynamic_vec_mut_write_then_shared_read_aliasing() {
+    // Probe: from_raw_parts_mut writes, then borrow_unchecked reads the
+    // same bytes through a different reference. The &mut [Address] and
+    // &[u8] point to overlapping memory through the same AccountView.
+    let tags = [[0x11; 32]];
+    let mut buf = make_dyn_buffer_exact(b"", &tags);
+    let view = unsafe { buf.view() };
+
+    // Step 1: mutable slice — write
+    {
+        let data = unsafe { view.borrow_unchecked_mut() };
+        let offset = DYN_HEADER_SIZE;
+        let slice: &mut [Address] = unsafe {
+            core::slice::from_raw_parts_mut(data[offset..].as_mut_ptr() as *mut Address, 1)
+        };
+        slice[0] = Address::new_from_array([0xFF; 32]);
+    }
+    // &mut dropped
+
+    // Step 2: shared read — must see the write from step 1
+    {
+        let data = unsafe { view.borrow_unchecked() };
+        let offset = DYN_HEADER_SIZE;
+        let slice: &[Address] = unsafe {
+            core::slice::from_raw_parts(data[offset..].as_ptr() as *const Address, 1)
+        };
+        assert_eq!(slice[0].as_array(), &[0xFF; 32]);
+    }
+}
+
+// ===========================================================================
+// 24. Dynamic fields — copy_nonoverlapping at exact allocation edge
+//
+// set_tags() with max tags fills the account to its last byte.
+// copy_nonoverlapping must not write past the allocation boundary.
+// ===========================================================================
+
+#[test]
+fn dynamic_vec_copy_nonoverlapping_at_allocation_edge() {
+    // Buffer: DYN_HEADER_SIZE + 3*32 = DYN_HEADER_SIZE + 96 bytes.
+    // Write 3 tags via copy_nonoverlapping — last byte written is
+    // data[DYN_HEADER_SIZE+95], which is the last data byte.
+    let mut buf = make_dyn_buffer_exact(b"", &[]);
+    let view = unsafe { buf.view() };
+    view.resize(DYN_HEADER_SIZE + 96).unwrap();
+
+    let new_tags = [
+        Address::new_from_array([0xAA; 32]),
+        Address::new_from_array([0xBB; 32]),
+        Address::new_from_array([0xCC; 32]),
+    ];
+
+    let data = unsafe { view.borrow_unchecked_mut() };
+    let offset = DYN_HEADER_SIZE;
+    let bytes = 96; // 3 * 32
+
+    // This copy_nonoverlapping writes to data[offset..offset+96].
+    // offset+96 == data.len(). Off-by-one → out of bounds.
+    assert_eq!(offset + bytes, view.data_len());
+    unsafe {
+        core::ptr::copy_nonoverlapping(
+            new_tags.as_ptr() as *const u8,
+            data[offset..].as_mut_ptr(),
+            bytes,
+        );
+    }
+
+    let zc = unsafe { &mut *(data[DYN_DISC_LEN..].as_mut_ptr() as *mut DynTestZc) };
+    zc.tags_count = PodU16::from(3u16);
+
+    // Read back the last element — touches bytes [data.len()-32..data.len()]
+    let data = unsafe { view.borrow_unchecked() };
+    let slice: &[Address] =
+        unsafe { core::slice::from_raw_parts(data[offset..].as_ptr() as *const Address, 3) };
+    assert_eq!(slice[2].as_array(), &[0xCC; 32]);
+}
+
+// ===========================================================================
+// 25. Instruction data — ZC header cast + variable tail at exact boundary
+//
+// Instruction data is a single Vec<u8>. The ZC cast + from_raw_parts must
+// not read past the Vec's length. Tests use exact-length Vecs.
+// ===========================================================================
+
+#[repr(C)]
+#[derive(Copy, Clone)]
+struct IxDataZc {
+    score: PodU64,
+    name_len: PodU16,
+}
+
+const _: () = assert!(align_of::<IxDataZc>() == 1);
+
+#[test]
+fn instruction_zc_cast_exact_length_vec() {
+    // Vec is exactly disc + sizeof(IxDataZc) + name_len bytes. No slack.
+    let name = b"solana";
+    let score: u64 = 42;
+
+    let mut ix_data: Vec<u8> = Vec::with_capacity(1 + size_of::<IxDataZc>() + name.len());
+    ix_data.push(0x00); // disc
+    ix_data.extend_from_slice(&score.to_le_bytes());
+    ix_data.extend_from_slice(&(name.len() as u16).to_le_bytes());
+    ix_data.extend_from_slice(name);
+    assert_eq!(ix_data.len(), ix_data.capacity()); // exact, no slack
+
+    let after_disc = &ix_data[1..];
+    let zc = unsafe { &*(after_disc.as_ptr() as *const IxDataZc) };
+    assert_eq!(zc.score.get(), 42);
+    assert_eq!(zc.name_len.get(), 6);
+
+    let tail = &after_disc[size_of::<IxDataZc>()..];
+    let dyn_len = zc.name_len.get() as usize;
+    assert_eq!(dyn_len, tail.len()); // tail is exactly the name, no extra bytes
+
+    let s = core::str::from_utf8(&tail[..dyn_len]).unwrap();
+    assert_eq!(s, "solana");
+}
+
+#[test]
+fn instruction_vec_arg_from_raw_parts_exact_boundary() {
+    // fn batch(items: Vec<PodU64, 10>) with exactly 10 items.
+    // from_raw_parts reads to the last byte of the Vec.
+    #[repr(C)]
+    #[derive(Copy, Clone)]
+    struct IxVecZc {
+        items_count: PodU16,
+    }
+    const _: () = assert!(align_of::<IxVecZc>() == 1);
+
+    let count = 10usize;
+    let cap = 1 + size_of::<IxVecZc>() + count * size_of::<PodU64>();
+    let mut ix_data = Vec::with_capacity(cap);
+    ix_data.push(0x01);
+    ix_data.extend_from_slice(&(count as u16).to_le_bytes());
+    for i in 0..count {
+        ix_data.extend_from_slice(&(i as u64).to_le_bytes());
+    }
+    assert_eq!(ix_data.len(), ix_data.capacity());
+
+    let after_disc = &ix_data[1..];
+    let zc = unsafe { &*(after_disc.as_ptr() as *const IxVecZc) };
+    assert_eq!(zc.items_count.get(), 10);
+
+    let tail = &after_disc[size_of::<IxVecZc>()..];
+    assert_eq!(tail.len(), count * size_of::<PodU64>()); // exact
+
+    let slice: &[PodU64] =
+        unsafe { core::slice::from_raw_parts(tail.as_ptr() as *const PodU64, count) };
+
+    // Read last element — touches bytes [tail.len()-8..tail.len()]
+    assert_eq!(slice[9].get(), 9);
+    assert_eq!(slice[0].get(), 0);
 }

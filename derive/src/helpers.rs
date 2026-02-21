@@ -1,7 +1,7 @@
 use quote::quote;
 use syn::{
     parse::{Parse, ParseStream},
-    Expr, Ident, LitInt, Token, Type,
+    Expr, ExprLit, GenericArgument, Ident, Lit, LitInt, PathArguments, Token, Type,
 };
 
 // --- Discriminator argument parsing (shared by instruction, account, event, program) ---
@@ -106,6 +106,110 @@ pub(crate) fn snake_to_pascal(s: &str) -> String {
             }
         })
         .collect()
+}
+
+// --- Dynamic field detection ---
+
+/// Detects `String<'a, N>` and returns `Some(N)` (the max byte length).
+pub(crate) fn is_dynamic_string(ty: &Type) -> Option<usize> {
+    if let Type::Path(type_path) = ty {
+        if let Some(seg) = type_path.path.segments.last() {
+            if seg.ident == "String" {
+                if let PathArguments::AngleBracketed(args) = &seg.arguments {
+                    let mut iter = args.args.iter();
+                    if !matches!(iter.next(), Some(GenericArgument::Lifetime(_))) {
+                        return None;
+                    }
+                    if let Some(GenericArgument::Const(Expr::Lit(ExprLit {
+                        lit: Lit::Int(lit_int),
+                        ..
+                    }))) = iter.next()
+                    {
+                        return lit_int.base10_parse::<usize>().ok();
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Detects `Vec<'a, T, N>` and returns `Some((T, N))` (element type, max count).
+pub(crate) fn is_dynamic_vec(ty: &Type) -> Option<(Type, usize)> {
+    if let Type::Path(type_path) = ty {
+        if let Some(seg) = type_path.path.segments.last() {
+            if seg.ident == "Vec" {
+                if let PathArguments::AngleBracketed(args) = &seg.arguments {
+                    let mut iter = args.args.iter();
+                    if !matches!(iter.next(), Some(GenericArgument::Lifetime(_))) {
+                        return None;
+                    }
+                    let elem_ty = match iter.next() {
+                        Some(GenericArgument::Type(ty)) => ty.clone(),
+                        _ => return None,
+                    };
+                    if let Some(GenericArgument::Const(Expr::Lit(ExprLit {
+                        lit: Lit::Int(lit_int),
+                        ..
+                    }))) = iter.next()
+                    {
+                        let max = lit_int.base10_parse::<usize>().ok()?;
+                        return Some((elem_ty, max));
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
+// --- Instruction-level dynamic field detection (no lifetime) ---
+
+/// Detects `String<N>` (no lifetime) in instruction args and returns `Some(N)`.
+pub(crate) fn is_ix_dynamic_string(ty: &Type) -> Option<usize> {
+    if let Type::Path(type_path) = ty {
+        if let Some(seg) = type_path.path.segments.last() {
+            if seg.ident == "String" {
+                if let PathArguments::AngleBracketed(args) = &seg.arguments {
+                    let mut iter = args.args.iter();
+                    if let Some(GenericArgument::Const(Expr::Lit(ExprLit {
+                        lit: Lit::Int(lit_int),
+                        ..
+                    }))) = iter.next()
+                    {
+                        return lit_int.base10_parse::<usize>().ok();
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Detects `Vec<T, N>` (no lifetime) in instruction args and returns `Some((T, N))`.
+pub(crate) fn is_ix_dynamic_vec(ty: &Type) -> Option<(Type, usize)> {
+    if let Type::Path(type_path) = ty {
+        if let Some(seg) = type_path.path.segments.last() {
+            if seg.ident == "Vec" {
+                if let PathArguments::AngleBracketed(args) = &seg.arguments {
+                    let mut iter = args.args.iter();
+                    let elem_ty = match iter.next() {
+                        Some(GenericArgument::Type(ty)) => ty.clone(),
+                        _ => return None,
+                    };
+                    if let Some(GenericArgument::Const(Expr::Lit(ExprLit {
+                        lit: Lit::Int(lit_int),
+                        ..
+                    }))) = iter.next()
+                    {
+                        let max = lit_int.base10_parse::<usize>().ok()?;
+                        return Some((elem_ty, max));
+                    }
+                }
+            }
+        }
+    }
+    None
 }
 
 // --- Zc (zero-copy) companion struct helpers ---

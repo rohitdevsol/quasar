@@ -21,6 +21,45 @@ impl<T: Owner> Account<T> {
     pub fn owner(&self) -> &'static Address {
         &T::OWNER
     }
+
+    #[inline(always)]
+    pub fn close(&self, destination: &AccountView) -> Result<(), ProgramError> {
+        let view = self.to_account_view();
+        destination.set_lamports(destination.lamports() + view.lamports());
+        view.set_lamports(0);
+        unsafe { view.assign(&SYSTEM_PROGRAM_ID) };
+        view.resize(0)?;
+        Ok(())
+    }
+
+    #[inline(always)]
+    pub fn realloc(
+        &self,
+        new_space: usize,
+        payer: &AccountView,
+        rent: Option<&crate::accounts::Rent>,
+    ) -> Result<(), ProgramError> {
+        let view = self.to_account_view();
+
+        let rent_exempt_lamports = match rent {
+            Some(rent_account) => rent_account.get()?.try_minimum_balance(new_space)?,
+            None => crate::sysvars::rent::Rent::get()?.try_minimum_balance(new_space)?,
+        };
+
+        let current_lamports = view.lamports();
+
+        if rent_exempt_lamports > current_lamports {
+            crate::cpi::system::transfer(payer, view, rent_exempt_lamports - current_lamports)
+                .invoke()?;
+        } else if current_lamports > rent_exempt_lamports {
+            let excess = current_lamports - rent_exempt_lamports;
+            view.set_lamports(rent_exempt_lamports);
+            payer.set_lamports(payer.lamports() + excess);
+        }
+
+        view.resize(new_space)?;
+        Ok(())
+    }
 }
 
 impl<T: Owner + AccountCheck> Account<T> {
@@ -70,45 +109,6 @@ impl<T: QuasarAccount + Owner> Account<T> {
         let mut data = self.view.try_borrow_mut()?;
         let disc = T::DISCRIMINATOR;
         value.serialize(&mut data[disc.len()..])
-    }
-
-    #[inline(always)]
-    pub fn close(&self, destination: &AccountView) -> Result<(), ProgramError> {
-        let view = self.to_account_view();
-        destination.set_lamports(destination.lamports() + view.lamports());
-        view.set_lamports(0);
-        unsafe { view.assign(&SYSTEM_PROGRAM_ID) };
-        view.resize(0)?;
-        Ok(())
-    }
-
-    #[inline(always)]
-    pub fn realloc(
-        &self,
-        new_space: usize,
-        payer: &AccountView,
-        rent: Option<&crate::accounts::Rent>,
-    ) -> Result<(), ProgramError> {
-        let view = self.to_account_view();
-
-        let rent_exempt_lamports = match rent {
-            Some(rent_account) => rent_account.get()?.try_minimum_balance(new_space)?,
-            None => crate::sysvars::rent::Rent::get()?.try_minimum_balance(new_space)?,
-        };
-
-        let current_lamports = view.lamports();
-
-        if rent_exempt_lamports > current_lamports {
-            crate::cpi::system::transfer(payer, view, rent_exempt_lamports - current_lamports)
-                .invoke()?;
-        } else if current_lamports > rent_exempt_lamports {
-            let excess = current_lamports - rent_exempt_lamports;
-            view.set_lamports(rent_exempt_lamports);
-            payer.set_lamports(payer.lamports() + excess);
-        }
-
-        view.resize(new_space)?;
-        Ok(())
     }
 }
 
