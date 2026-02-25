@@ -8,5 +8,7 @@ pub mod initialize;
 pub use initialize::*;
 pub mod rent;
 pub use rent::*;
+pub mod clock;
+pub use clock::*;
 pub mod account;
 pub use account::*;
