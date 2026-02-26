@@ -76,7 +76,7 @@ fn test_withdraw() {
 
     let (vault, _vault_bump) =
         Address::find_program_address(&[b"vault", user.as_ref()], &crate::ID);
-    let vault_account = Account::new(0, 0, &system_program);
+    let vault_account = Account::new(0, 0, &crate::ID);
 
     let deposit_amount: u64 = 1_000_000_000;
 
@@ -94,7 +94,7 @@ fn test_withdraw() {
         &[
             (user, user_account),
             (vault, vault_account),
-            (system_program, system_program_account.clone()),
+            (system_program, system_program_account),
         ],
     );
     assert!(
@@ -112,7 +112,6 @@ fn test_withdraw() {
     let withdraw_ix: Instruction = WithdrawInstruction {
         user,
         vault,
-        system_program,
         amount: withdraw_amount,
     }
     .into();
@@ -122,7 +121,6 @@ fn test_withdraw() {
         &[
             (user, user_after_deposit.clone()),
             (vault, vault_after_deposit),
-            (system_program, system_program_account),
         ],
     );
 
