@@ -218,10 +218,7 @@ fn extract_errors_gap() {
 fn to_camel_case_basic() {
     assert_eq!(helpers::to_camel_case("make_offer"), "makeOffer");
     assert_eq!(helpers::to_camel_case("take"), "take");
-    assert_eq!(
-        helpers::to_camel_case("some_long_name"),
-        "someLongName"
-    );
+    assert_eq!(helpers::to_camel_case("some_long_name"), "someLongName");
 }
 
 // ---------------------------------------------------------------------------
@@ -368,10 +365,7 @@ fn build_idl_full_pipeline() {
     let idl = quasar_idl::parser::build_idl(parsed);
 
     // Verify structure
-    assert_eq!(
-        idl.address,
-        "ABcDeFgH111111111111111111111111111111111111"
-    );
+    assert_eq!(idl.address, "ABcDeFgH111111111111111111111111111111111111");
     assert_eq!(idl.metadata.name, "test_program");
     assert_eq!(idl.instructions[0].name, "makeOffer"); // camelCase
     assert_eq!(idl.instructions[0].discriminator, vec![1]);
@@ -524,7 +518,10 @@ fn no_collision_same_disc_different_kinds() {
     };
 
     let collisions = find_discriminator_collisions(&parsed);
-    assert!(collisions.is_empty(), "cross-kind same-disc should not collide");
+    assert!(
+        collisions.is_empty(),
+        "cross-kind same-disc should not collide"
+    );
 }
 
 #[test]

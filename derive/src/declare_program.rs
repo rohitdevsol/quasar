@@ -132,10 +132,7 @@ fn map_idl_type(ty: &IdlType) -> Result<TypeInfo, String> {
 // Code generation
 // ---------------------------------------------------------------------------
 
-fn generate_data_write(
-    args: &[IdlField],
-    disc: &[u8],
-) -> Result<(TokenStream2, usize), String> {
+fn generate_data_write(args: &[IdlField], disc: &[u8]) -> Result<(TokenStream2, usize), String> {
     let disc_len = disc.len();
     let mut offset = disc_len;
     let mut write_stmts = Vec::new();
@@ -380,12 +377,9 @@ pub fn declare_program(input: TokenStream) -> TokenStream {
     match iter.next() {
         Some(proc_macro2::TokenTree::Punct(p)) if p.as_char() == ',' => {}
         _ => {
-            return syn::Error::new(
-                Span::call_site(),
-                "expected comma after module name",
-            )
-            .to_compile_error()
-            .into();
+            return syn::Error::new(Span::call_site(), "expected comma after module name")
+                .to_compile_error()
+                .into();
         }
     };
 
@@ -397,21 +391,15 @@ pub fn declare_program(input: TokenStream) -> TokenStream {
             if s.starts_with('"') && s.ends_with('"') {
                 s[1..s.len() - 1].to_string()
             } else {
-                return syn::Error::new(
-                    Span::call_site(),
-                    "expected string literal for IDL path",
-                )
-                .to_compile_error()
-                .into();
+                return syn::Error::new(Span::call_site(), "expected string literal for IDL path")
+                    .to_compile_error()
+                    .into();
             }
         }
         _ => {
-            return syn::Error::new(
-                Span::call_site(),
-                "expected string literal for IDL path",
-            )
-            .to_compile_error()
-            .into();
+            return syn::Error::new(Span::call_site(), "expected string literal for IDL path")
+                .to_compile_error()
+                .into();
         }
     };
 
@@ -453,10 +441,7 @@ pub fn declare_program(input: TokenStream) -> TokenStream {
     for ix in &idl.instructions {
         for arg in &ix.args {
             if let Err(msg) = map_idl_type(&arg.ty) {
-                let full_msg = format!(
-                    "in instruction '{}', arg '{}': {}",
-                    ix.name, arg.name, msg
-                );
+                let full_msg = format!("in instruction '{}', arg '{}': {}", ix.name, arg.name, msg);
                 return syn::Error::new(Span::call_site(), full_msg)
                     .to_compile_error()
                     .into();

@@ -302,7 +302,9 @@ fn error_code_try_from_past_last_variant() {
 // #[account] — discriminator validation (Account<T>::from_account_view)
 // ---------------------------------------------------------------------------
 
-use quasar_core::__internal::{AccountView, RuntimeAccount, MAX_PERMITTED_DATA_INCREASE, NOT_BORROWED};
+use quasar_core::__internal::{
+    AccountView, RuntimeAccount, MAX_PERMITTED_DATA_INCREASE, NOT_BORROWED,
+};
 use quasar_core::accounts::Account;
 
 struct AccountBuffer {
@@ -311,8 +313,10 @@ struct AccountBuffer {
 
 impl AccountBuffer {
     fn new(data_len: usize) -> Self {
-        let byte_len =
-            std::mem::size_of::<RuntimeAccount>() + data_len + MAX_PERMITTED_DATA_INCREASE + std::mem::size_of::<u64>();
+        let byte_len = std::mem::size_of::<RuntimeAccount>()
+            + data_len
+            + MAX_PERMITTED_DATA_INCREASE
+            + std::mem::size_of::<u64>();
         let u64_count = (byte_len + 7) / 8;
         Self {
             inner: std::vec![0; u64_count],

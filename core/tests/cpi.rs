@@ -1,6 +1,8 @@
 use std::mem::size_of;
 
-use quasar_core::__internal::{AccountView, RuntimeAccount, MAX_PERMITTED_DATA_INCREASE, NOT_BORROWED};
+use quasar_core::__internal::{
+    AccountView, RuntimeAccount, MAX_PERMITTED_DATA_INCREASE, NOT_BORROWED,
+};
 use quasar_core::cpi::system;
 use solana_address::Address;
 

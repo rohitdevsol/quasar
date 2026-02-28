@@ -55,10 +55,7 @@ fn endianness_u64() {
 fn endianness_u128() {
     let pod = PodU128::from(1u128);
     let bytes: [u8; 16] = unsafe { std::mem::transmute(pod) };
-    assert_eq!(
-        bytes,
-        [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
-    );
+    assert_eq!(bytes, [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
 }
 
 #[test]
@@ -203,10 +200,7 @@ fn pod_plus_native() {
 
 #[test]
 fn pod_plus_pod() {
-    assert_eq!(
-        PodU64::from(5u64) + PodU64::from(3u64),
-        PodU64::from(8u64)
-    );
+    assert_eq!(PodU64::from(5u64) + PodU64::from(3u64), PodU64::from(8u64));
 }
 
 #[test]
