@@ -27,7 +27,8 @@ pub fn generate(crate_path: &Path, generate_typescript: bool) -> CliResult {
     std::fs::create_dir_all(&idl_dir)?;
 
     let idl_path = idl_dir.join(format!("{}.idl.json", idl.metadata.name));
-    let json = serde_json::to_string_pretty(&idl).map_err(|e| anyhow::anyhow!("failed to serialize IDL: {e}"))?;
+    let json = serde_json::to_string_pretty(&idl)
+        .map_err(|e| anyhow::anyhow!("failed to serialize IDL: {e}"))?;
     std::fs::write(&idl_path, &json)?;
 
     if generate_typescript {

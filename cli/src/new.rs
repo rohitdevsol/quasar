@@ -6,7 +6,8 @@ use {
 pub fn run_instruction(name: &str) -> CliResult {
     let snake = name.replace('-', "_");
 
-    // Validate: must be a valid Rust identifier (ascii alphanumeric + underscore, not starting with digit)
+    // Validate: must be a valid Rust identifier (ascii alphanumeric + underscore,
+    // not starting with digit)
     if snake.is_empty()
         || snake.starts_with(|c: char| c.is_ascii_digit())
         || !snake.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
@@ -15,7 +16,10 @@ pub fn run_instruction(name: &str) -> CliResult {
             "  {}",
             style::fail(&format!("invalid instruction name: \"{name}\""))
         );
-        eprintln!("  {}", style::dim("must be a valid Rust identifier (e.g. transfer, create_pool)"));
+        eprintln!(
+            "  {}",
+            style::dim("must be a valid Rust identifier (e.g. transfer, create_pool)")
+        );
         std::process::exit(1);
     }
 

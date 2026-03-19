@@ -273,13 +273,23 @@ fn print_banner() {
     out.flush().ok();
 }
 
-fn write_text_char(out: &mut impl std::io::Write, ch: char, line: usize, col: usize, by_off: usize) {
+fn write_text_char(
+    out: &mut impl std::io::Write,
+    ch: char,
+    line: usize,
+    col: usize,
+    by_off: usize,
+) {
     if ch == ' ' {
         write!(out, " ").ok();
     } else {
         match line {
-            1..=7 => { write!(out, "\x1b[36m{ch}\x1b[0m").ok(); }
-            9 => { write!(out, "\x1b[1m{ch}\x1b[0m").ok(); }
+            1..=7 => {
+                write!(out, "\x1b[36m{ch}\x1b[0m").ok();
+            }
+            9 => {
+                write!(out, "\x1b[1m{ch}\x1b[0m").ok();
+            }
             10 => {
                 if col - by_off < 3 {
                     write!(out, "\x1b[90m{ch}\x1b[0m").ok();
@@ -287,7 +297,9 @@ fn write_text_char(out: &mut impl std::io::Write, ch: char, line: usize, col: us
                     write!(out, "\x1b[36m{ch}\x1b[0m").ok();
                 }
             }
-            _ => { write!(out, " ").ok(); }
+            _ => {
+                write!(out, " ").ok();
+            }
         };
     }
 }
@@ -361,22 +373,37 @@ pub fn run(
 
     // Validate explicit flag values before proceeding
     if let Some(ref f) = framework_override {
-        if !matches!(f.as_str(), "none" | "mollusk" | "quasarsvm-rust" | "quasarsvm-web3js" | "quasarsvm-kit") {
-            eprintln!("  {}", crate::style::fail(&format!("unknown framework: {f}")));
-            eprintln!("  {}", dim("valid: none, mollusk, quasarsvm-rust, quasarsvm-web3js, quasarsvm-kit"));
+        if !matches!(
+            f.as_str(),
+            "none" | "mollusk" | "quasarsvm-rust" | "quasarsvm-web3js" | "quasarsvm-kit"
+        ) {
+            eprintln!(
+                "  {}",
+                crate::style::fail(&format!("unknown framework: {f}"))
+            );
+            eprintln!(
+                "  {}",
+                dim("valid: none, mollusk, quasarsvm-rust, quasarsvm-web3js, quasarsvm-kit")
+            );
             std::process::exit(1);
         }
     }
     if let Some(ref t) = template_override {
         if !matches!(t.as_str(), "minimal" | "full") {
-            eprintln!("  {}", crate::style::fail(&format!("unknown template: {t}")));
+            eprintln!(
+                "  {}",
+                crate::style::fail(&format!("unknown template: {t}"))
+            );
             eprintln!("  {}", dim("valid: minimal, full"));
             std::process::exit(1);
         }
     }
     if let Some(ref t) = toolchain_override {
         if !matches!(t.as_str(), "solana" | "upstream") {
-            eprintln!("  {}", crate::style::fail(&format!("unknown toolchain: {t}")));
+            eprintln!(
+                "  {}",
+                crate::style::fail(&format!("unknown toolchain: {t}"))
+            );
             eprintln!("  {}", dim("valid: solana, upstream"));
             std::process::exit(1);
         }

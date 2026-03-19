@@ -18,7 +18,10 @@ pub fn run(action: Option<ConfigAction>) -> CliResult {
         }
         Some(ConfigAction::Set { key, value }) => {
             if let Err(valid) = validate_value(&key, &value) {
-                eprintln!("  {}", style::fail(&format!("invalid value for {key}: {value}")));
+                eprintln!(
+                    "  {}",
+                    style::fail(&format!("invalid value for {key}: {value}"))
+                );
                 eprintln!("  {}", style::dim(&format!("valid: {valid}")));
                 std::process::exit(1);
             }
@@ -104,7 +107,13 @@ const ITEMS: &[ConfigItem] = &[
     ConfigItem {
         key: "defaults.framework",
         label: "Default test framework",
-        kind: ConfigKind::Choice(&["none", "mollusk", "quasarsvm-rust", "quasarsvm-web3js", "quasarsvm-kit"]),
+        kind: ConfigKind::Choice(&[
+            "none",
+            "mollusk",
+            "quasarsvm-rust",
+            "quasarsvm-web3js",
+            "quasarsvm-kit",
+        ]),
     },
     ConfigItem {
         key: "defaults.template",
@@ -285,7 +294,16 @@ fn validate_value(key: &str, value: &str) -> Result<(), &'static str> {
             }
         }
         "defaults.framework" => {
-            if matches!(value, "none" | "mollusk" | "quasarsvm-rust" | "quasarsvm-web3js" | "quasarsvm-kit" | "null" | "") {
+            if matches!(
+                value,
+                "none"
+                    | "mollusk"
+                    | "quasarsvm-rust"
+                    | "quasarsvm-web3js"
+                    | "quasarsvm-kit"
+                    | "null"
+                    | ""
+            ) {
                 Ok(())
             } else {
                 Err("none, mollusk, quasarsvm-rust, quasarsvm-web3js, quasarsvm-kit")
@@ -299,7 +317,10 @@ fn validate_value(key: &str, value: &str) -> Result<(), &'static str> {
             }
         }
         "ui.animation" | "ui.color" | "ui.timing" => {
-            if matches!(value, "true" | "false" | "1" | "0" | "yes" | "no" | "on" | "off") {
+            if matches!(
+                value,
+                "true" | "false" | "1" | "0" | "yes" | "no" | "on" | "off"
+            ) {
                 Ok(())
             } else {
                 Err("true, false")
