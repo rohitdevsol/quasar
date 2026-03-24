@@ -58,7 +58,7 @@ fn generate_ts(idl: &Idl, target: TsTarget) -> String {
             let mut kit_imports: Vec<&str> = vec!["type Address", "address"];
             if has_instructions {
                 kit_imports.push("AccountRole");
-                kit_imports.push("type IInstruction");
+                kit_imports.push("type Instruction");
             }
             if has_pdas {
                 kit_imports.push("getProgramDerivedAddress");
@@ -684,9 +684,9 @@ fn generate_instruction_builders_kit(out: &mut String, idl: &Idl) {
             format!("input: {pascal}InstructionInput")
         };
         let return_type = if ix_has_pdas {
-            "Promise<IInstruction>"
+            "Promise<Instruction>"
         } else {
-            "IInstruction"
+            "Instruction"
         };
         let async_kw = if ix_has_pdas { "async " } else { "" };
         writeln!(
@@ -771,7 +771,7 @@ fn generate_instruction_builders_kit(out: &mut String, idl: &Idl) {
             .expect("write to String");
         }
 
-        // Return IInstruction
+        // Return Instruction
         out.push_str("    return {\n");
         out.push_str("      programAddress: PROGRAM_ADDRESS,\n");
         if !ix.accounts.is_empty() || ix.has_remaining {
