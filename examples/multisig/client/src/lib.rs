@@ -1,8 +1,11 @@
-use {
-    alloc::{vec, vec::Vec},
-    solana_address::Address,
-    solana_instruction::{AccountMeta, Instruction},
-};
+use std::vec;
+use std::vec::Vec;
+use quasar_lang::client::{DynBytes, DynVec};
+use wincode::{SchemaWrite, SchemaRead};
+use solana_address::Address;
+use solana_instruction::{AccountMeta, Instruction};
+
+pub const ID: Address = solana_address::address!("44444444444444444444444444444444444444444444");
 
 pub struct CreateInstruction {
     pub creator: Address,
@@ -23,9 +26,9 @@ impl From<CreateInstruction> for Instruction {
         ];
         accounts.extend(ix.remaining_accounts);
         let mut data = vec![0];
-        data.push(ix.threshold);
+        data.extend_from_slice(&wincode::serialize(&ix.threshold).unwrap());
         Instruction {
-            program_id: crate::ID,
+            program_id: ID,
             accounts,
             data,
         }
@@ -49,9 +52,9 @@ impl From<DepositInstruction> for Instruction {
             AccountMeta::new_readonly(ix.system_program, false),
         ];
         let mut data = vec![1];
-        data.extend_from_slice(&ix.amount.to_le_bytes());
+        data.extend_from_slice(&wincode::serialize(&ix.amount).unwrap());
         Instruction {
-            program_id: crate::ID,
+            program_id: ID,
             accounts,
             data,
         }
@@ -62,7 +65,7 @@ pub struct SetLabelInstruction {
     pub creator: Address,
     pub config: Address,
     pub system_program: Address,
-    pub label: Vec<u8>,
+    pub label: DynBytes,
 }
 
 impl From<SetLabelInstruction> for Instruction {
@@ -73,10 +76,9 @@ impl From<SetLabelInstruction> for Instruction {
             AccountMeta::new_readonly(ix.system_program, false),
         ];
         let mut data = vec![2];
-        data.extend_from_slice(&(ix.label.len() as u32).to_le_bytes());
-        data.extend_from_slice(&ix.label);
+        data.extend_from_slice(&wincode::serialize(&ix.label).unwrap());
         Instruction {
-            program_id: crate::ID,
+            program_id: ID,
             accounts,
             data,
         }
@@ -104,11 +106,34 @@ impl From<ExecuteTransferInstruction> for Instruction {
         ];
         accounts.extend(ix.remaining_accounts);
         let mut data = vec![3];
-        data.extend_from_slice(&ix.amount.to_le_bytes());
+        data.extend_from_slice(&wincode::serialize(&ix.amount).unwrap());
         Instruction {
-            program_id: crate::ID,
+            program_id: ID,
             accounts,
             data,
         }
     }
+}
+
+pub const MULTISIG_CONFIG_ACCOUNT_DISCRIMINATOR: &[u8] = &[1];
+
+#[derive(Clone, SchemaWrite, SchemaRead)]
+pub struct MultisigConfig {
+    pub creator: Address,
+    pub threshold: u8,
+    pub bump: u8,
+    pub label: DynBytes,
+    pub signers: DynVec<Address>,
+}
+
+pub enum ProgramAccount {
+    MultisigConfig(MultisigConfig),
+}
+
+pub fn decode_account(data: &[u8]) -> Option<ProgramAccount> {
+    if data.starts_with(MULTISIG_CONFIG_ACCOUNT_DISCRIMINATOR) {
+        let payload = &data[MULTISIG_CONFIG_ACCOUNT_DISCRIMINATOR.len()..];
+        return wincode::deserialize::<MultisigConfig>(payload).ok().map(ProgramAccount::MultisigConfig);
+    }
+    None
 }

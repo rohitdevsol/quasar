@@ -1,6 +1,8 @@
-use alloc::vec;
+use std::vec;
 use solana_address::Address;
 use solana_instruction::{AccountMeta, Instruction};
+
+pub const ID: Address = solana_address::address!("33333333333333333333333333333333333333333333");
 
 pub struct DepositInstruction {
     pub user: Address,
@@ -17,9 +19,9 @@ impl From<DepositInstruction> for Instruction {
             AccountMeta::new_readonly(ix.system_program, false),
         ];
         let mut data = vec![0];
-        data.extend_from_slice(&ix.amount.to_le_bytes());
+        data.extend_from_slice(&wincode::serialize(&ix.amount).unwrap());
         Instruction {
-            program_id: crate::ID,
+            program_id: ID,
             accounts,
             data,
         }
@@ -39,12 +41,11 @@ impl From<WithdrawInstruction> for Instruction {
             AccountMeta::new(ix.vault, false),
         ];
         let mut data = vec![1];
-        data.extend_from_slice(&ix.amount.to_le_bytes());
+        data.extend_from_slice(&wincode::serialize(&ix.amount).unwrap());
         Instruction {
-            program_id: crate::ID,
+            program_id: ID,
             accounts,
             data,
         }
     }
 }
-
