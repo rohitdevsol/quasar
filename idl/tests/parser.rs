@@ -1196,6 +1196,212 @@ fn rust_codegen_imports_with_remaining() {
     assert!(code.contains("use std::vec::Vec;"), "{code}");
 }
 
+#[test]
+fn rust_codegen_no_wincode_derive_import_when_unused() {
+    let mut parsed = test_program();
+    parsed.instructions.push(program::RawInstruction {
+        name: "init".to_string(),
+        discriminator: vec![0],
+        accounts_type_name: "Init".to_string(),
+        args: vec![("amount".to_string(), syn::parse_str("u64").unwrap())],
+        has_remaining: false,
+    });
+    let code = generate_client(&parsed);
+
+    // No custom types, events, or accounts → no SchemaWrite/SchemaRead import
+    assert!(
+        !code.contains("use wincode::{SchemaWrite, SchemaRead}"),
+        "should not import derive macros when unused: {code}"
+    );
+    // But wincode::serialize is still used inline
+    assert!(code.contains("wincode::serialize"), "{code}");
+}
+
+#[test]
+fn rust_codegen_wincode_derive_import_with_events() {
+    let mut parsed = test_program();
+    parsed.events = events::extract_events(&parse_file(
+        r#"
+        #[event(discriminator = [10])]
+        pub struct Transfer {
+            pub amount: u64,
+        }
+        "#,
+    ));
+    let code = generate_client(&parsed);
+
+    assert!(
+        code.contains("use wincode::{SchemaWrite, SchemaRead}"),
+        "events with fields need derive import: {code}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Account codegen: dynamic fields omit Copy
+// ---------------------------------------------------------------------------
+
+#[test]
+fn rust_codegen_account_with_dynamic_field_no_copy() {
+    let mut parsed = test_program();
+    parsed.state_accounts = state::extract_state_accounts(&parse_file(
+        r#"
+        #[account(discriminator = [1])]
+        pub struct Profile {
+            pub owner: Address,
+            pub name: String<100>,
+        }
+        "#,
+    ));
+    let code = generate_client(&parsed);
+
+    // Dynamic field (String) → no Copy, no repr(C)
+    assert!(
+        !code.contains("#[derive(Clone, Copy,"),
+        "account with dynamic field must not derive Copy: {code}"
+    );
+    assert!(
+        code.contains("#[derive(Clone, SchemaWrite, SchemaRead)]"),
+        "{code}"
+    );
+    assert!(
+        !code.contains("#[repr(C)]\npub struct Profile"),
+        "account with dynamic field must not use repr(C): {code}"
+    );
+}
+
+#[test]
+fn rust_codegen_account_fixed_fields_has_copy() {
+    let mut parsed = test_program();
+    parsed.state_accounts = state::extract_state_accounts(&parse_file(
+        r#"
+        #[account(discriminator = [1])]
+        pub struct Escrow {
+            pub maker: Address,
+            pub amount: u64,
+        }
+        "#,
+    ));
+    let code = generate_client(&parsed);
+
+    // All fixed-size fields → derive Copy + repr(C)
+    assert!(
+        code.contains("#[derive(Clone, Copy, SchemaWrite, SchemaRead)]"),
+        "{code}"
+    );
+    assert!(code.contains("#[repr(C)]"), "{code}");
+}
+
+// ---------------------------------------------------------------------------
+// Nested struct resolution: accounts and events
+// ---------------------------------------------------------------------------
+
+#[test]
+fn rust_codegen_account_with_inner_struct() {
+    let mut parsed = test_program();
+    parsed.data_structs.push(quasar_idl::parser::RawDataStruct {
+        name: "InnerConfig".to_string(),
+        fields: vec![
+            ("limit".to_string(), syn::parse_str("u64").unwrap()),
+            ("enabled".to_string(), syn::parse_str("bool").unwrap()),
+        ],
+    });
+    parsed.state_accounts = state::extract_state_accounts(&parse_file(
+        r#"
+        #[account(discriminator = [1])]
+        pub struct Vault {
+            pub owner: Address,
+            pub config: InnerConfig,
+        }
+        "#,
+    ));
+    let code = generate_client(&parsed);
+
+    // InnerConfig must be defined in generated code
+    assert!(
+        code.contains("pub struct InnerConfig {"),
+        "inner struct must be generated for account field: {code}"
+    );
+    assert!(code.contains("pub limit: u64,"), "{code}");
+    assert!(code.contains("pub enabled: bool,"), "{code}");
+
+    // Account uses the inner type
+    assert!(code.contains("pub config: InnerConfig,"), "{code}");
+
+    // decode_account should compile (InnerConfig has SchemaRead)
+    assert!(
+        code.contains("wincode::deserialize::<Vault>(payload)"),
+        "{code}"
+    );
+}
+
+#[test]
+fn rust_codegen_event_with_inner_struct() {
+    let mut parsed = test_program();
+    parsed.data_structs.push(quasar_idl::parser::RawDataStruct {
+        name: "TradeInfo".to_string(),
+        fields: vec![
+            ("price".to_string(), syn::parse_str("u64").unwrap()),
+            ("quantity".to_string(), syn::parse_str("u32").unwrap()),
+        ],
+    });
+    parsed.events = events::extract_events(&parse_file(
+        r#"
+        #[event(discriminator = [10])]
+        pub struct TradeExecuted {
+            pub info: TradeInfo,
+            pub maker: Address,
+        }
+        "#,
+    ));
+    let code = generate_client(&parsed);
+
+    // TradeInfo must be defined
+    assert!(
+        code.contains("pub struct TradeInfo {"),
+        "inner struct must be generated for event field: {code}"
+    );
+
+    // Event uses the inner type
+    assert!(code.contains("pub info: TradeInfo,"), "{code}");
+}
+
+#[test]
+fn rust_codegen_deeply_nested_structs() {
+    let mut parsed = test_program();
+    parsed.data_structs.push(quasar_idl::parser::RawDataStruct {
+        name: "Inner".to_string(),
+        fields: vec![("value".to_string(), syn::parse_str("u64").unwrap())],
+    });
+    parsed.data_structs.push(quasar_idl::parser::RawDataStruct {
+        name: "Outer".to_string(),
+        fields: vec![
+            ("inner".to_string(), syn::parse_str("Inner").unwrap()),
+            ("count".to_string(), syn::parse_str("u32").unwrap()),
+        ],
+    });
+    parsed.state_accounts = state::extract_state_accounts(&parse_file(
+        r#"
+        #[account(discriminator = [1])]
+        pub struct MyAccount {
+            pub data: Outer,
+        }
+        "#,
+    ));
+    let code = generate_client(&parsed);
+
+    // Both Inner and Outer must be defined
+    assert!(
+        code.contains("pub struct Inner {"),
+        "transitively referenced struct must be generated: {code}"
+    );
+    assert!(
+        code.contains("pub struct Outer {"),
+        "directly referenced struct must be generated: {code}"
+    );
+    assert!(code.contains("pub inner: Inner,"), "{code}");
+    assert!(code.contains("pub data: Outer,"), "{code}");
+}
+
 // ===========================================================================
 // TypeScript codegen
 // ===========================================================================
@@ -1223,6 +1429,69 @@ fn ts_codegen_remaining_accounts() {
     assert!(
         code.contains("...(input.remainingAccounts ?? [])"),
         "{code}"
+    );
+}
+
+#[test]
+fn ts_codegen_prefix_aware_codecs() {
+    use quasar_idl::{
+        codegen::typescript::generate_ts_client_kit,
+        parser::build_idl,
+    };
+
+    let file = parse_file(
+        r#"
+        #[program]
+        mod my_program {
+            #[instruction(discriminator = [1])]
+            pub fn set_name(ctx: Ctx<SetName>, name: String<u8, 100>) -> Result<(), ProgramError> {
+                Ok(())
+            }
+
+            #[instruction(discriminator = [2])]
+            pub fn set_label(ctx: Ctx<SetLabel>, label: String<200>) -> Result<(), ProgramError> {
+                Ok(())
+            }
+
+            #[instruction(discriminator = [3])]
+            pub fn set_tags(ctx: Ctx<SetTags>, tags: Vec<u64, u16, 500>) -> Result<(), ProgramError> {
+                Ok(())
+            }
+        }
+        "#,
+    );
+    let (_, instructions) = program::extract_program_module(&file).unwrap();
+    let mut parsed = test_program();
+    parsed.instructions = instructions;
+    let idl = build_idl(parsed);
+    let code = generate_ts_client_kit(&idl);
+
+    // String<u8, 100> → u8 prefix codec
+    assert!(
+        code.contains("addCodecSizePrefix(getUtf8Codec(), getU8Codec())"),
+        "String<u8> must use getU8Codec(): {code}"
+    );
+
+    // String<200> → default u32 prefix codec
+    assert!(
+        code.contains("addCodecSizePrefix(getUtf8Codec(), getU32Codec())"),
+        "String (default) must use getU32Codec(): {code}"
+    );
+
+    // Vec<u64, u16, 500> → u16 prefix codec
+    assert!(
+        code.contains("getArrayCodec(getU64Codec(), { size: getU16Codec() })"),
+        "Vec<u64, u16> must use getU16Codec(): {code}"
+    );
+
+    // No helper functions emitted
+    assert!(
+        !code.contains("function getDynStringCodec"),
+        "should not emit helper functions: {code}"
+    );
+    assert!(
+        !code.contains("function getDynVecCodec"),
+        "should not emit helper functions: {code}"
     );
 }
 
@@ -1256,6 +1525,74 @@ fn idl_json_has_remaining() {
 
     assert_eq!(value["instructions"][0]["hasRemaining"], true);
     assert!(value["instructions"][1].get("hasRemaining").is_none());
+}
+
+// ===========================================================================
+// IDL JSON: prefixBytes serialization
+// ===========================================================================
+
+#[test]
+fn idl_json_prefix_bytes_serialization() {
+    use quasar_idl::parser::build_idl;
+
+    let file = parse_file(
+        r#"
+        #[program]
+        mod my_program {
+            #[instruction(discriminator = [1])]
+            pub fn set_name(ctx: Ctx<SetName>, name: String<u8, 100>) -> Result<(), ProgramError> {
+                Ok(())
+            }
+
+            #[instruction(discriminator = [2])]
+            pub fn set_label(ctx: Ctx<SetLabel>, label: String<200>) -> Result<(), ProgramError> {
+                Ok(())
+            }
+
+            #[instruction(discriminator = [3])]
+            pub fn set_tags(ctx: Ctx<SetTags>, tags: Vec<u64, u16, 500>) -> Result<(), ProgramError> {
+                Ok(())
+            }
+
+            #[instruction(discriminator = [4])]
+            pub fn set_ids(ctx: Ctx<SetIds>, ids: Vec<u64, 10>) -> Result<(), ProgramError> {
+                Ok(())
+            }
+        }
+        "#,
+    );
+    let (_, instructions) = program::extract_program_module(&file).unwrap();
+    let mut parsed = test_program();
+    parsed.instructions = instructions;
+    let idl = build_idl(parsed);
+    let json = serde_json::to_string_pretty(&idl).unwrap();
+    let value: serde_json::Value = serde_json::from_str(&json).unwrap();
+
+    // String<u8, 100> → prefixBytes: 1
+    let name_ty = &value["instructions"][0]["args"][0]["type"]["string"];
+    assert_eq!(name_ty["maxLength"], 100);
+    assert_eq!(name_ty["prefixBytes"], 1, "u8 prefix must serialize: {json}");
+
+    // String<200> → default u32 prefix, prefixBytes omitted
+    let label_ty = &value["instructions"][1]["args"][0]["type"]["string"];
+    assert_eq!(label_ty["maxLength"], 200);
+    assert!(
+        label_ty.get("prefixBytes").is_none(),
+        "default u32 prefix must be omitted: {json}"
+    );
+
+    // Vec<u64, u16, 500> → prefixBytes: 2
+    let tags_ty = &value["instructions"][2]["args"][0]["type"]["vec"];
+    assert_eq!(tags_ty["maxLength"], 500);
+    assert_eq!(tags_ty["prefixBytes"], 2, "u16 prefix must serialize: {json}");
+
+    // Vec<u64, 10> → default u32 prefix, prefixBytes omitted
+    let ids_ty = &value["instructions"][3]["args"][0]["type"]["vec"];
+    assert_eq!(ids_ty["maxLength"], 10);
+    assert!(
+        ids_ty.get("prefixBytes").is_none(),
+        "default u32 prefix must be omitted: {json}"
+    );
 }
 
 // ===========================================================================

@@ -44,6 +44,7 @@ use {
 /// - `DynBytes<u8>` — 1-byte prefix (max 255 bytes)
 /// - `DynBytes<u16>` — 2-byte prefix
 /// - `DynBytes` / `DynBytes<u32>` — 4-byte prefix (default)
+#[derive(Debug, Clone, PartialEq)]
 pub struct DynBytes<P = u32>(pub Vec<u8>, PhantomData<P>);
 
 impl<P> DynBytes<P> {
@@ -99,6 +100,7 @@ where
 /// - `DynVec<T, u8>` — 1-byte prefix (max 255 elements)
 /// - `DynVec<T, u16>` — 2-byte prefix
 /// - `DynVec<T>` / `DynVec<T, u32>` — 4-byte prefix (default)
+#[derive(Debug, Clone, PartialEq)]
 pub struct DynVec<T, P = u32>(pub Vec<T>, PhantomData<P>);
 
 impl<T, P> DynVec<T, P> {
@@ -146,7 +148,9 @@ where
 
     fn read(mut reader: impl Reader<'de>, dst: &mut MaybeUninit<Self>) -> ReadResult<()> {
         let len = <UseIntLen<P>>::read(reader.by_ref())?;
-        let mut vec = Vec::with_capacity(len);
+        // Cap pre-allocation to avoid OOM from untrusted length prefixes.
+        // The actual read loop will fail early if the reader runs out of data.
+        let mut vec = Vec::with_capacity(len.min(4096));
         for _ in 0..len {
             vec.push(T::get(reader.by_ref())?);
         }
@@ -164,6 +168,7 @@ where
 /// On write, emits the raw bytes. On read, consumes all remaining bytes
 /// from the reader. Useful for variable-length trailing data in instruction
 /// payloads.
+#[derive(Debug, Clone, PartialEq)]
 pub struct TailBytes(pub Vec<u8>);
 
 unsafe impl<C: ConfigCore> SchemaWrite<C> for TailBytes {

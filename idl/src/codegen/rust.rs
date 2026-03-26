@@ -47,7 +47,12 @@ pub fn generate_client(parsed: &ParsedProgram) -> String {
     if has_dynamic {
         out.push_str("use quasar_lang::client::{DynBytes, DynVec, TailBytes};\n");
     }
-    out.push_str("use wincode::{SchemaWrite, SchemaRead};\n");
+    let needs_wincode_derives = !parsed.data_structs.is_empty()
+        || parsed.events.iter().any(|ev| !ev.fields.is_empty())
+        || parsed.state_accounts.iter().any(|acc| !acc.fields.is_empty());
+    if needs_wincode_derives {
+        out.push_str("use wincode::{SchemaWrite, SchemaRead};\n");
+    }
     out.push_str("use solana_address::Address;\n");
     out.push_str("use solana_instruction::{AccountMeta, Instruction};\n\n");
 
@@ -59,13 +64,26 @@ pub fn generate_client(parsed: &ParsedProgram) -> String {
     )
     .expect("write to String");
 
-    // Build type map for custom data types referenced in instruction args
+    // Build type map for custom data types referenced anywhere: instruction args,
+    // state account fields, and event fields. Transitively resolves nested types.
     let type_map: HashMap<String, Vec<(String, IdlType)>> = {
         let mut map = HashMap::new();
 
         let mut referenced = std::collections::BTreeSet::new();
         for ix in &parsed.instructions {
             for (_, ty) in &ix.args {
+                let idl_ty = helpers::map_type_from_syn(ty);
+                collect_defined_refs(&idl_ty, &mut referenced);
+            }
+        }
+        for acc in &parsed.state_accounts {
+            for (_, ty) in &acc.fields {
+                let idl_ty = helpers::map_type_from_syn(ty);
+                collect_defined_refs(&idl_ty, &mut referenced);
+            }
+        }
+        for ev in &parsed.events {
+            for (_, ty) in &ev.fields {
                 let idl_ty = helpers::map_type_from_syn(ty);
                 collect_defined_refs(&idl_ty, &mut referenced);
             }
@@ -230,7 +248,17 @@ pub fn generate_client(parsed: &ParsedProgram) -> String {
 
         // Account struct definitions (use original snake_case field names)
         for acc in &parsed.state_accounts {
-            out.push_str("#[derive(Clone, Copy, SchemaWrite, SchemaRead)]\n#[repr(C)]\n");
+            let acc_has_dynamic = acc.fields.iter().any(|(_, ty)| {
+                matches!(
+                    helpers::map_type_from_syn(ty),
+                    IdlType::DynString { .. } | IdlType::DynVec { .. } | IdlType::Tail { .. }
+                )
+            });
+            if acc_has_dynamic {
+                out.push_str("#[derive(Clone, SchemaWrite, SchemaRead)]\n");
+            } else {
+                out.push_str("#[derive(Clone, Copy, SchemaWrite, SchemaRead)]\n#[repr(C)]\n");
+            }
             writeln!(out, "pub struct {} {{", acc.name).expect("write to String");
             for (field_name, field_ty) in &acc.fields {
                 writeln!(
