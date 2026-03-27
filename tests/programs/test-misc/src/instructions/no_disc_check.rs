@@ -10,13 +10,8 @@ pub struct InitNoDisc<'info> {
 
 impl<'info> InitNoDisc<'info> {
     #[inline(always)]
-    pub fn handler(
-        &mut self,
-        value: u64,
-        _bumps: &InitNoDiscBumps,
-    ) -> Result<(), ProgramError> {
-        self.account
-            .set_inner(*self.payer.address(), value);
+    pub fn handler(&mut self, value: u64, _bumps: &InitNoDiscBumps) -> Result<(), ProgramError> {
+        self.account.set_inner(*self.payer.address(), value);
         Ok(())
     }
 }

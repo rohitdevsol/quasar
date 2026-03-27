@@ -1284,7 +1284,8 @@ pub(super) fn process_fields(
                                 return true; // Rule 2: {field_name}_bump: u8
                             }
                             if name == "bump" && bare_bump_pda_count == 1 {
-                                return true; // Rule 3: single bare-bump PDA + bump: u8
+                                return true; // Rule 3: single bare-bump PDA +
+                                             // bump: u8
                             }
                             false
                         })
@@ -1304,8 +1305,9 @@ pub(super) fn process_fields(
                             }
                         }
                     } else if !is_init_field {
-                        // Try inner account's BUMP_OFFSET (non-init only — init accounts don't have data yet).
-                        // Extract inner type T from Account<T> for BUMP_OFFSET lookup.
+                        // Try inner account's BUMP_OFFSET (non-init only — init accounts don't have
+                        // data yet). Extract inner type T from Account<T>
+                        // for BUMP_OFFSET lookup.
                         let inner_ty = extract_generic_inner_type(underlying_ty, "Account");
 
                         if let Some(inner_ty) = inner_ty {
