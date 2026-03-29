@@ -359,19 +359,13 @@ pub(crate) fn derive_accounts(input: TokenStream) -> TokenStream {
 
     // --- Parse body generation (3 code paths) ---
 
-    let has_any_checks = !pf.has_one_checks.is_empty()
-        || !pf.constraint_checks.is_empty()
-        || !pf.mut_checks.is_empty()
-        || !pf.pda_checks.is_empty()
+    let has_any_checks = !pf.field_checks.is_empty()
         || !pf.init_pda_checks.is_empty()
         || !pf.init_blocks.is_empty();
 
     let seed_addr_captures = &pf.seed_addr_captures;
     let bump_init_vars = &pf.bump_init_vars;
-    let mut_checks = &pf.mut_checks;
-    let has_one_checks = &pf.has_one_checks;
-    let constraint_checks = &pf.constraint_checks;
-    let pda_checks = &pf.pda_checks;
+    let field_checks = &pf.field_checks;
     let field_constructs = &pf.field_constructs;
     let init_pda_checks = &pf.init_pda_checks;
     let init_blocks = &pf.init_blocks;
@@ -417,10 +411,7 @@ pub(crate) fn derive_accounts(input: TokenStream) -> TokenStream {
 
                 {
                     let Self { #(ref #field_names,)* } = result;
-                    #(#mut_checks)*
-                    #(#has_one_checks)*
-                    #(#constraint_checks)*
-                    #(#pda_checks)*
+                    #(#field_checks)*
                 }
 
                 Ok((result, #bumps_init))
@@ -455,10 +446,7 @@ pub(crate) fn derive_accounts(input: TokenStream) -> TokenStream {
 
             {
                 let Self { #(ref #field_names,)* } = result;
-                #(#mut_checks)*
-                #(#has_one_checks)*
-                #(#constraint_checks)*
-                #(#pda_checks)*
+                #(#field_checks)*
             }
 
             Ok((result, #bumps_init))
