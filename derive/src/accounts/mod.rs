@@ -9,11 +9,11 @@ mod fields;
 mod init;
 mod instruction_args;
 
+pub(crate) use instruction_args::InstructionArg;
+
 use {
     crate::helpers::{extract_generic_inner_type, is_composite_type, strip_generics},
-    instruction_args::{
-        generate_instruction_arg_extraction, parse_struct_instruction_args, InstructionArg,
-    },
+    instruction_args::{generate_instruction_arg_extraction, parse_struct_instruction_args},
     proc_macro::TokenStream,
     quote::{format_ident, quote},
     syn::{parse_macro_input, Data, DeriveInput, Fields, Type},

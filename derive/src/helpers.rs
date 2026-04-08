@@ -305,6 +305,71 @@ pub(crate) fn seed_slice_expr_for_parse(
     quote! { #expr as &[u8] }
 }
 
+/// Resolve a typed seed argument to a `&[u8]` expression.
+///
+/// Typed seeds use `seeds = Type::seeds(arg1, arg2)` syntax. Each argument is
+/// resolved by its expression kind:
+/// - Bare identifier matching a prior account field -> address bytes
+/// - Bare identifier matching an instruction arg -> type-appropriate conversion
+/// - Dotted field access (`config.namespace`) -> raw byte cast via `from_raw_parts`
+/// - Anything else -> emit as-is, let rustc decide
+pub(crate) fn typed_seed_slice_expr(
+    expr: &Expr,
+    field_names: &[String],
+    instruction_args: &Option<Vec<crate::accounts::InstructionArg>>,
+) -> proc_macro2::TokenStream {
+    match expr {
+        // Bare identifier
+        Expr::Path(ep) if ep.path.segments.len() == 1 && ep.qself.is_none() => {
+            let ident = &ep.path.segments[0].ident;
+            let name = ident.to_string();
+
+            // Account field -> address
+            if field_names.contains(&name) {
+                return quote! { #ident.to_account_view().address().as_ref() };
+            }
+
+            // Instruction arg -> type-appropriate conversion
+            if let Some(args) = instruction_args {
+                if let Some(arg) = args.iter().find(|a| a.name == *ident) {
+                    return ix_arg_to_seed_bytes(&arg.name, &arg.ty);
+                }
+            }
+
+            // Unknown — emit as-is, rustc will error
+            quote! { &#ident as &[u8] }
+        }
+
+        // Dotted field access: config.namespace
+        // Zero-copy Pod field on a previously-parsed account.
+        // All Pod types are #[repr(transparent)] over [u8; N].
+        // Use from_raw_parts for a zero-cost byte reference.
+        Expr::Field(field_expr) => {
+            quote! {
+                unsafe {
+                    core::slice::from_raw_parts(
+                        &#field_expr as *const _ as *const u8,
+                        core::mem::size_of_val(&#field_expr),
+                    )
+                }
+            }
+        }
+
+        // Byte literal or other expression
+        _ => quote! { #expr as &[u8] },
+    }
+}
+
+fn ix_arg_to_seed_bytes(name: &syn::Ident, ty: &Type) -> proc_macro2::TokenStream {
+    let type_str = quote!(#ty).to_string().replace(' ', "");
+    match type_str.as_str() {
+        "u8" => quote! { &[#name] },
+        "bool" => quote! { &[#name as u8] },
+        "Address" | "Pubkey" => quote! { #name.as_ref() },
+        _ => quote! { &#name.to_le_bytes() },
+    }
+}
+
 /// Check if a field type's base type is `Signer`.
 pub(crate) fn is_signer_type(ty: &Type) -> bool {
     let inner = match ty {

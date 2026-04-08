@@ -11,7 +11,10 @@ use {
         },
         CloseFieldInfo, CpiCloseInfo, ProcessedFields, SweepFieldInfo,
     },
-    crate::helpers::{extract_generic_inner_type, seed_slice_expr_for_parse, strip_generics},
+    crate::helpers::{
+        extract_generic_inner_type, seed_slice_expr_for_parse, strip_generics,
+        typed_seed_slice_expr,
+    },
     quote::{format_ident, quote},
     syn::{Expr, ExprLit, Ident, Lit, Type},
 };
@@ -34,7 +37,9 @@ pub(crate) fn process_fields(
 
     let bare_bump_pda_count = field_attrs
         .iter()
-        .filter(|a| a.seeds.is_some() && matches!(a.bump, Some(None)))
+        .filter(|a| {
+            (a.seeds.is_some() || a.typed_seeds.is_some()) && matches!(a.bump, Some(None))
+        })
         .count();
 
     let has_any_init = field_attrs.iter().any(|a| a.is_init || a.init_if_needed);
@@ -846,6 +851,289 @@ pub(crate) fn process_fields(
             seeds_methods.push(quote! {
                 #[inline(always)]
                 pub fn #method_name(&self) -> [quasar_lang::cpi::Seed<'_>; #seed_count] {
+                    [#(#seed_elements),*]
+                }
+            });
+        }
+
+        // --- Typed seeds: seeds = Type::seeds(arg1, arg2, ...) ---
+        if let Some(typed) = &attrs.typed_seeds {
+            let type_path = &typed.type_path;
+            let bump_var = format_ident!("__bumps_{}", field_name);
+
+            bump_init_vars.push(quote! { let mut #bump_var: u8 = 0; });
+            bump_struct_fields.push(quote! { pub #field_name: u8 });
+            bump_struct_inits.push(quote! { #field_name: #bump_var });
+
+            let bump_arr_field = format_ident!("__{}_bump", field_name);
+            bump_struct_fields.push(quote! { #bump_arr_field: [u8; 1] });
+            bump_struct_inits.push(quote! { #bump_arr_field: [#bump_var] });
+
+            // Build seed slices: prefix from type const + dynamic args
+            let mut all_seed_slices: Vec<proc_macro2::TokenStream> = vec![
+                quote! { <#type_path as quasar_lang::traits::HasSeeds>::SEED_PREFIX },
+            ];
+            for arg in &typed.args {
+                all_seed_slices.push(typed_seed_slice_expr(
+                    arg,
+                    field_name_strings,
+                    instruction_args,
+                ));
+            }
+
+            if all_seed_slices.len() > 15 {
+                return Err(syn::Error::new_spanned(
+                    field_name,
+                    format!(
+                        "`{}` exceeds Solana's PDA seed limit: {} seeds provided, max is 16 \
+                         including bump",
+                        field_name,
+                        all_seed_slices.len()
+                    ),
+                )
+                .to_compile_error()
+                .into());
+            }
+
+            let seed_idents: Vec<Ident> = all_seed_slices
+                .iter()
+                .enumerate()
+                .map(|(idx, _)| format_ident!("__seed_{}_{}", field_name, idx))
+                .collect();
+
+            let seed_len_checks: Vec<proc_macro2::TokenStream> = seed_idents
+                .iter()
+                .zip(all_seed_slices.iter())
+                .map(|(ident, seed)| {
+                    quote! {
+                        let #ident: &[u8] = #seed;
+                        if #ident.len() > 32 {
+                            return Err(QuasarError::InvalidSeeds.into());
+                        }
+                    }
+                })
+                .collect();
+
+            let target_checks = if is_init_field {
+                &mut init_pda_checks
+            } else {
+                &mut this_field_checks
+            };
+
+            let addr_access = if is_init_field {
+                quote! { *#field_name.address() }
+            } else {
+                quote! { *#field_name.to_account_view().address() }
+            };
+
+            match &attrs.bump {
+                Some(Some(bump_expr)) => {
+                    let check = quote! {
+                        {
+                            #(#seed_len_checks)*
+                            let __bump_val: u8 = #bump_expr;
+                            let __bump_ref: &[u8] = &[__bump_val];
+                            let __pda_seeds = [#(#seed_idents,)* __bump_ref];
+                            quasar_lang::pda::verify_program_address(&__pda_seeds, __program_id, &#addr_access)
+                                .map_err(|__e| {
+                                    #[cfg(feature = "debug")]
+                                    quasar_lang::prelude::log(concat!(
+                                        "Account '", stringify!(#field_name),
+                                        "': PDA verification failed"
+                                    ));
+                                    __e
+                                })?;
+                            #bump_var = __bump_val;
+                        }
+                    };
+                    target_checks.push(check);
+                }
+                Some(None) => {
+                    let field_bump_name = format!("{}_bump", field_name);
+
+                    let ix_arg_match = instruction_args.as_ref().and_then(|args| {
+                        args.iter().find(|a| {
+                            if !is_type_u8(&a.ty) {
+                                return false;
+                            }
+                            let name = a.name.to_string();
+                            if name == field_bump_name {
+                                return true;
+                            }
+                            if name == "bump" && bare_bump_pda_count == 1 {
+                                return true;
+                            }
+                            false
+                        })
+                    });
+
+                    let check = if let Some(arg) = ix_arg_match {
+                        let arg_ident = &arg.name;
+                        quote! {
+                            {
+                                #(#seed_len_checks)*
+                                let __bump_val: u8 = #arg_ident;
+                                let __bump_ref: &[u8] = &[__bump_val];
+                                let __pda_seeds = [#(#seed_idents,)* __bump_ref];
+                                quasar_lang::pda::verify_program_address(&__pda_seeds, __program_id, &#addr_access)
+                                    .map_err(|__e| {
+                                        #[cfg(feature = "debug")]
+                                        quasar_lang::prelude::log(concat!(
+                                            "Account '", stringify!(#field_name),
+                                            "': PDA verification failed"
+                                        ));
+                                        __e
+                                    })?;
+                                #bump_var = __bump_val;
+                            }
+                        }
+                    } else if !is_init_field {
+                        if let FieldKind::Account { inner_ty } = &kind {
+                            let view_access = quote! { #field_name.to_account_view() };
+                            quote! {
+                                {
+                                    #(#seed_len_checks)*
+                                    if let Some(__offset) = <#inner_ty as Discriminator>::BUMP_OFFSET {
+                                        if quasar_lang::utils::hint::unlikely(__offset >= #view_access.data_len()) {
+                                            #[cfg(feature = "debug")]
+                                            quasar_lang::prelude::log(concat!(
+                                                "BUMP_OFFSET out of bounds for account '",
+                                                stringify!(#field_name), "'"
+                                            ));
+                                            return Err(ProgramError::AccountDataTooSmall);
+                                        }
+                                        let __bump_val: u8 = unsafe { *#view_access.data_ptr().add(__offset) };
+                                        let __bump_ref: &[u8] = &[__bump_val];
+                                        let __pda_seeds = [#(#seed_idents,)* __bump_ref];
+                                        quasar_lang::pda::verify_program_address(&__pda_seeds, __program_id, &#addr_access)
+                                            .map_err(|__e| {
+                                                #[cfg(feature = "debug")]
+                                                quasar_lang::prelude::log(concat!(
+                                                    "Account '", stringify!(#field_name),
+                                                    "': PDA verification failed"
+                                                ));
+                                                __e
+                                            })?;
+                                        #bump_var = __bump_val;
+                                    } else {
+                                        let __pda_seeds = [#(#seed_idents),*];
+                                        let (__expected, __bump) = quasar_lang::pda::based_try_find_program_address(&__pda_seeds, __program_id)?;
+                                        if #addr_access != __expected {
+                                            #[cfg(feature = "debug")]
+                                            quasar_lang::prelude::log(concat!(
+                                                "Account '", stringify!(#field_name),
+                                                "': PDA verification failed"
+                                            ));
+                                            return Err(QuasarError::InvalidPda.into());
+                                        }
+                                        #bump_var = __bump;
+                                    }
+                                }
+                            }
+                        } else {
+                            quote! {
+                                {
+                                    #(#seed_len_checks)*
+                                    let __pda_seeds = [#(#seed_idents),*];
+                                    let (__expected, __bump) = quasar_lang::pda::based_try_find_program_address(&__pda_seeds, __program_id)?;
+                                    if #addr_access != __expected {
+                                        #[cfg(feature = "debug")]
+                                        quasar_lang::prelude::log(concat!(
+                                            "Account '", stringify!(#field_name),
+                                            "': PDA verification failed"
+                                        ));
+                                        return Err(QuasarError::InvalidPda.into());
+                                    }
+                                    #bump_var = __bump;
+                                }
+                            }
+                        }
+                    } else {
+                        quote! {
+                            {
+                                #(#seed_len_checks)*
+                                let __pda_seeds = [#(#seed_idents),*];
+                                let (__expected, __bump) = quasar_lang::pda::based_try_find_program_address(&__pda_seeds, __program_id)?;
+                                if #addr_access != __expected {
+                                    #[cfg(feature = "debug")]
+                                    quasar_lang::prelude::log(concat!(
+                                        "Account '", stringify!(#field_name),
+                                        "': PDA verification failed"
+                                    ));
+                                    return Err(QuasarError::InvalidPda.into());
+                                }
+                                #bump_var = __bump;
+                            }
+                        }
+                    };
+
+                    target_checks.push(check);
+                }
+                None => {
+                    return Err(syn::Error::new_spanned(
+                        field_name,
+                        "#[account(seeds = Type::seeds(...))] requires a `bump` or `bump = expr` \
+                         directive",
+                    )
+                    .to_compile_error()
+                    .into());
+                }
+            }
+
+            // CPI seed method
+            let method_name = format_ident!("{}_seeds", field_name);
+            // prefix + dynamic args + bump
+            let total_seed_count = typed.args.len() + 2;
+            let mut seed_elements: Vec<proc_macro2::TokenStream> = Vec::new();
+
+            // Prefix seed
+            seed_elements.push(
+                quote! { quasar_lang::cpi::Seed::from(<#type_path as quasar_lang::traits::HasSeeds>::SEED_PREFIX) },
+            );
+
+            // Dynamic seed elements — capture values for CPI
+            for (i, arg) in typed.args.iter().enumerate() {
+                if let Expr::Path(ep) = arg {
+                    if ep.qself.is_none() && ep.path.segments.len() == 1 {
+                        let ident = &ep.path.segments[0].ident;
+                        if field_name_strings.contains(&ident.to_string()) {
+                            // Account key reference — capture address
+                            let addr_field =
+                                format_ident!("__seed_{}_{}", field_name, ident);
+                            let capture_var =
+                                format_ident!("__seed_addr_{}_{}", field_name, ident);
+                            seed_addr_captures
+                                .push(quote! { let #capture_var = *#ident.address(); });
+                            bump_struct_fields.push(quote! { #addr_field: Address });
+                            bump_struct_inits
+                                .push(quote! { #addr_field: #capture_var });
+                            seed_elements.push(
+                                quote! { quasar_lang::cpi::Seed::from(self.#addr_field.as_ref()) },
+                            );
+                            continue;
+                        }
+                    }
+                }
+                // For instruction args and field accesses, re-emit the expression.
+                // TODO: For CPI reconstruction of non-address seeds (instruction args,
+                // field accesses), the seed method on Bumps may not have access to these
+                // values. This works for PDA verification but needs a capture strategy
+                // for CPI signing in a follow-up.
+                let seed_expr =
+                    typed_seed_slice_expr(arg, field_name_strings, instruction_args);
+                let _capture_idx = i; // suppress unused warning
+                seed_elements
+                    .push(quote! { quasar_lang::cpi::Seed::from(#seed_expr) });
+            }
+
+            // Bump seed element
+            seed_elements.push(
+                quote! { quasar_lang::cpi::Seed::from(&self.#bump_arr_field as &[u8]) },
+            );
+
+            seeds_methods.push(quote! {
+                #[inline(always)]
+                pub fn #method_name(&self) -> [quasar_lang::cpi::Seed<'_>; #total_seed_count] {
                     [#(#seed_elements),*]
                 }
             });
