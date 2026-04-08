@@ -280,9 +280,9 @@ fn extract_eq_ident(s: &str) -> Option<String> {
     }
 }
 
-/// Extract account references from a `seeds = [...]` or `seeds = Type::seeds(...)`
-/// directive. Looks for patterns like `ident.key()`, `ident.address()`, or bare
-/// identifiers.
+/// Extract account references from a `seeds = [...]` or `seeds =
+/// Type::seeds(...)` directive. Looks for patterns like `ident.key()`,
+/// `ident.address()`, or bare identifiers.
 fn extract_seed_account_refs(seeds_directive: &str) -> Vec<String> {
     // Check for Type::seeds(...) syntax first
     if let Some(refs) = extract_typed_seed_refs(seeds_directive) {
@@ -363,8 +363,8 @@ fn extract_seed_account_refs(seeds_directive: &str) -> Vec<String> {
     refs
 }
 
-/// Extract account references from a `seeds = Type::seeds(arg1, arg2)` directive.
-/// Returns None if the directive is not in typed-seeds format.
+/// Extract account references from a `seeds = Type::seeds(arg1, arg2)`
+/// directive. Returns None if the directive is not in typed-seeds format.
 ///
 /// Handles syn's token spacing where `Type::seeds(` may appear as
 /// `Type :: seeds (` — the `find("::")` and `.trim()` calls normalize this.
@@ -412,10 +412,7 @@ fn extract_typed_seed_refs(seeds_directive: &str) -> Option<Vec<String>> {
             continue;
         }
         // Bare identifier → account ref
-        if trimmed
-            .chars()
-            .all(|c| c.is_alphanumeric() || c == '_')
-        {
+        if trimmed.chars().all(|c| c.is_alphanumeric() || c == '_') {
             refs.push(trimmed.to_string());
         }
     }
@@ -557,12 +554,18 @@ mod tests {
     fn extract_typed_seed_refs_spaced() {
         // syn may produce `Type :: seeds (` with spaces around `::`
         let refs = extract_typed_seed_refs("seeds = Vault :: seeds ( authority , index )");
-        assert_eq!(refs, Some(vec!["authority".to_string(), "index".to_string()]));
+        assert_eq!(
+            refs,
+            Some(vec!["authority".to_string(), "index".to_string()])
+        );
     }
 
     #[test]
     fn extract_typed_seed_refs_compact() {
         let refs = extract_typed_seed_refs("seeds = Vault::seeds(authority, index)");
-        assert_eq!(refs, Some(vec!["authority".to_string(), "index".to_string()]));
+        assert_eq!(
+            refs,
+            Some(vec!["authority".to_string(), "index".to_string()])
+        );
     }
 }

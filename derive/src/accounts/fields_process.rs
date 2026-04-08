@@ -47,26 +47,24 @@ fn gen_bump_check(
     seeds_syntax_label: &str,
 ) -> Result<proc_macro2::TokenStream, proc_macro::TokenStream> {
     match bump {
-        Some(Some(bump_expr)) => {
-            Ok(quote! {
-                {
-                    #(#seed_len_checks)*
-                    let __bump_val: u8 = #bump_expr;
-                    let __bump_ref: &[u8] = &[__bump_val];
-                    let __pda_seeds = [#(#seed_idents,)* __bump_ref];
-                    quasar_lang::pda::verify_program_address(&__pda_seeds, __program_id, &#addr_access)
-                        .map_err(|__e| {
-                            #[cfg(feature = "debug")]
-                            quasar_lang::prelude::log(concat!(
-                                "Account '", stringify!(#field_name),
-                                "': PDA verification failed"
-                            ));
-                            __e
-                        })?;
-                    #bump_var = __bump_val;
-                }
-            })
-        }
+        Some(Some(bump_expr)) => Ok(quote! {
+            {
+                #(#seed_len_checks)*
+                let __bump_val: u8 = #bump_expr;
+                let __bump_ref: &[u8] = &[__bump_val];
+                let __pda_seeds = [#(#seed_idents,)* __bump_ref];
+                quasar_lang::pda::verify_program_address(&__pda_seeds, __program_id, &#addr_access)
+                    .map_err(|__e| {
+                        #[cfg(feature = "debug")]
+                        quasar_lang::prelude::log(concat!(
+                            "Account '", stringify!(#field_name),
+                            "': PDA verification failed"
+                        ));
+                        __e
+                    })?;
+                #bump_var = __bump_val;
+            }
+        }),
         Some(None) => {
             let field_bump_name = format!("{}_bump", field_name);
 
@@ -188,17 +186,15 @@ fn gen_bump_check(
 
             Ok(check)
         }
-        None => {
-            Err(syn::Error::new_spanned(
-                field_name,
-                format!(
-                    "#[account({})] requires a `bump` or `bump = expr` directive",
-                    seeds_syntax_label,
-                ),
-            )
-            .to_compile_error()
-            .into())
-        }
+        None => Err(syn::Error::new_spanned(
+            field_name,
+            format!(
+                "#[account({})] requires a `bump` or `bump = expr` directive",
+                seeds_syntax_label,
+            ),
+        )
+        .to_compile_error()
+        .into()),
     }
 }
 
@@ -216,9 +212,7 @@ pub(crate) fn process_fields(
 
     let bare_bump_pda_count = field_attrs
         .iter()
-        .filter(|a| {
-            (a.seeds.is_some() || a.typed_seeds.is_some()) && matches!(a.bump, Some(None))
-        })
+        .filter(|a| (a.seeds.is_some() || a.typed_seeds.is_some()) && matches!(a.bump, Some(None)))
         .count();
 
     let has_any_init = field_attrs.iter().any(|a| a.is_init || a.init_if_needed);
@@ -787,8 +781,8 @@ pub(crate) fn process_fields(
                 return Err(syn::Error::new_spanned(
                     field_name,
                     format!(
-                        "raw `seeds = [...]` is not allowed on program accounts. \
-                         Add `#[seeds(...)]` to `{}` and use `{}::seeds(...)` instead.",
+                        "raw `seeds = [...]` is not allowed on program accounts. Add \
+                         `#[seeds(...)]` to `{}` and use `{}::seeds(...)` instead.",
                         quote::quote!(#inner_ty),
                         quote::quote!(#inner_ty),
                     ),
@@ -937,9 +931,8 @@ pub(crate) fn process_fields(
             bump_struct_inits.push(quote! { #bump_arr_field: [#bump_var] });
 
             // Build seed slices: prefix from type const + dynamic args
-            let mut all_seed_slices: Vec<proc_macro2::TokenStream> = vec![
-                quote! { <#type_path as quasar_lang::traits::HasSeeds>::SEED_PREFIX },
-            ];
+            let mut all_seed_slices: Vec<proc_macro2::TokenStream> =
+                vec![quote! { <#type_path as quasar_lang::traits::HasSeeds>::SEED_PREFIX }];
             for arg in &typed.args {
                 all_seed_slices.push(typed_seed_slice_expr(
                     arg,
@@ -1071,8 +1064,9 @@ pub(crate) fn process_fields(
                                             .push(quote! { #ix_bytes_field: [u8; 1] });
                                     }
                                     "bool" => {
-                                        seed_addr_captures
-                                            .push(quote! { let #capture_var: [u8; 1] = [#ident as u8]; });
+                                        seed_addr_captures.push(
+                                            quote! { let #capture_var: [u8; 1] = [#ident as u8]; },
+                                        );
                                         bump_struct_fields
                                             .push(quote! { #ix_bytes_field: [u8; 1] });
                                     }
@@ -1084,14 +1078,14 @@ pub(crate) fn process_fields(
                                     }
                                     _ => {
                                         // Numeric types — store as le bytes array
-                                        seed_addr_captures
-                                            .push(quote! { let #capture_var = #ident.to_le_bytes(); });
+                                        seed_addr_captures.push(
+                                            quote! { let #capture_var = #ident.to_le_bytes(); },
+                                        );
                                         bump_struct_fields
                                             .push(quote! { #ix_bytes_field: [u8; core::mem::size_of::<#ty>()] });
                                     }
                                 }
-                                bump_struct_inits
-                                    .push(quote! { #ix_bytes_field: #capture_var });
+                                bump_struct_inits.push(quote! { #ix_bytes_field: #capture_var });
                                 // Reference ix arg bytes via bumps parameter
                                 seed_elements.push(
                                     quote! { quasar_lang::cpi::Seed::from(&bumps.#ix_bytes_field as &[u8]) },
@@ -1108,15 +1102,13 @@ pub(crate) fn process_fields(
                     // so this is a zero-cost reference.
                     let seed_expr =
                         typed_seed_method_expr(arg, field_name_strings, instruction_args);
-                    seed_elements
-                        .push(quote! { quasar_lang::cpi::Seed::from(#seed_expr) });
+                    seed_elements.push(quote! { quasar_lang::cpi::Seed::from(#seed_expr) });
                 }
             }
 
             // Bump seed element — reference via bumps parameter
-            seed_elements.push(
-                quote! { quasar_lang::cpi::Seed::from(&bumps.#bump_arr_field as &[u8]) },
-            );
+            seed_elements
+                .push(quote! { quasar_lang::cpi::Seed::from(&bumps.#bump_arr_field as &[u8]) });
 
             seeds_methods.push(quote! {
                 #[inline(always)]

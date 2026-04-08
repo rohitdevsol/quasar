@@ -311,7 +311,8 @@ pub(crate) fn seed_slice_expr_for_parse(
 /// resolved by its expression kind:
 /// - Bare identifier matching a prior account field -> address bytes
 /// - Bare identifier matching an instruction arg -> type-appropriate conversion
-/// - Dotted field access (`config.namespace`) -> raw byte cast via `from_raw_parts`
+/// - Dotted field access (`config.namespace`) -> raw byte cast via
+///   `from_raw_parts`
 /// - Anything else -> emit as-is, let rustc decide
 pub(crate) fn typed_seed_slice_expr(
     expr: &Expr,

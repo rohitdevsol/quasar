@@ -168,8 +168,9 @@ fn detect_known_address(ty: &syn::Type) -> Option<String> {
     }
 }
 
-/// Parse `#[account(seeds = [...], bump)]` or `#[account(seeds = Type::seeds(...), bump)]`
-/// from field attributes. Returns `(Option<RawPda>, Option<seed_type_name>)`.
+/// Parse `#[account(seeds = [...], bump)]` or `#[account(seeds =
+/// Type::seeds(...), bump)]` from field attributes. Returns `(Option<RawPda>,
+/// Option<seed_type_name>)`.
 fn parse_pda_from_attrs(
     attrs: &[syn::Attribute],
     sibling_names: &[String],

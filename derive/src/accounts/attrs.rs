@@ -131,8 +131,7 @@ impl Parse for AccountDirective {
                                     ));
                                 }
                                 // Build type path: all segments except the last "seeds"
-                                let all: Vec<syn::PathSegment> =
-                                    segments.iter().cloned().collect();
+                                let all: Vec<syn::PathSegment> = segments.iter().cloned().collect();
                                 if all.len() < 2 {
                                     return Err(syn::Error::new_spanned(
                                         &func_path.path,
@@ -144,8 +143,7 @@ impl Parse for AccountDirective {
                                 for (i, seg) in type_segs.iter().enumerate() {
                                     type_segments.push_value(seg.clone());
                                     if i < type_segs.len() - 1 {
-                                        type_segments
-                                            .push_punct(<Token![::]>::default());
+                                        type_segments.push_punct(<Token![::]>::default());
                                     }
                                 }
                                 let type_path = syn::Path {
