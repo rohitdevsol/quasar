@@ -224,10 +224,7 @@ fn parse_typed_seeds_call(tokens_str: &str) -> Option<(String, Vec<String>)> {
     let after_eq = after_seeds[eq_idx + 1..].trim();
 
     // Check that this is Type::seeds( and NOT seeds = [
-    let colons_idx = match after_eq.find("::") {
-        Some(idx) => idx,
-        None => return None,
-    };
+    let colons_idx = after_eq.find("::")?;
 
     // Extract the type name (everything before ::)
     let type_name = after_eq[..colons_idx].trim().to_string();
@@ -396,7 +393,8 @@ fn parse_single_seed(s: &str, sibling_names: &[String]) -> Option<RawSeed> {
         return Some(RawSeed::AccountRef(s.to_string()));
     }
 
-    // Simple identifier (instruction arg) or dotted access (field.subfield) → arg ref
+    // Simple identifier (instruction arg) or dotted access (field.subfield) → arg
+    // ref
     let clean = s.replace(' ', "");
     if !clean.is_empty()
         && clean

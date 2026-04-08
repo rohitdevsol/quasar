@@ -12,11 +12,7 @@ pub struct InitIxDataSeed<'info> {
 
 impl<'info> InitIxDataSeed<'info> {
     #[inline(always)]
-    pub fn handler(
-        &mut self,
-        index: u64,
-        bumps: &InitIxDataSeedBumps,
-    ) -> Result<(), ProgramError> {
+    pub fn handler(&mut self, index: u64, bumps: &InitIxDataSeedBumps) -> Result<(), ProgramError> {
         self.item
             .set_inner(*self.authority.address(), index, bumps.item);
         Ok(())

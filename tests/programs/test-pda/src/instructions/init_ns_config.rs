@@ -10,7 +10,11 @@ pub struct InitNsConfig<'info> {
 }
 
 impl<'info> InitNsConfig<'info> {
-    pub fn handler(&mut self, namespace: u32, bumps: &InitNsConfigBumps) -> Result<(), ProgramError> {
+    pub fn handler(
+        &mut self,
+        namespace: u32,
+        bumps: &InitNsConfigBumps,
+    ) -> Result<(), ProgramError> {
         self.config.set_inner(namespace, bumps.config);
         Ok(())
     }

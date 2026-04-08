@@ -1,4 +1,5 @@
 #![allow(unexpected_cfgs)]
+extern crate alloc;
 use quasar_lang::prelude::*;
 
 solana_address::declare_id!("11111111111111111111111111111112");

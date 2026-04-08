@@ -89,7 +89,8 @@ pub struct TailBytesAccount<'a> {
     pub data: &'a [u8],
 }
 
-/// Same shape as SimpleAccount but with a different seed prefix — for space-override test.
+/// Same shape as SimpleAccount but with a different seed prefix — for
+/// space-override test.
 #[account(discriminator = 1)]
 #[seeds(b"spacetest", authority: Address)]
 pub struct SpaceTestAccount {
@@ -98,7 +99,8 @@ pub struct SpaceTestAccount {
     pub bump: u8,
 }
 
-/// Same shape as SimpleAccount but with a different seed prefix — for explicit-payer test.
+/// Same shape as SimpleAccount but with a different seed prefix — for
+/// explicit-payer test.
 #[account(discriminator = 1)]
 #[seeds(b"explicit", authority: Address)]
 pub struct ExplicitPayerAccount {

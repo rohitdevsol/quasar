@@ -1218,8 +1218,7 @@ fn test_typed_seed_deserialized_field() {
     let namespace: u32 = 42;
 
     // Step 1: Create the NamespaceConfig
-    let (config_pda, _) =
-        Address::find_program_address(&[b"ns_config"], &quasar_test_pda::ID);
+    let (config_pda, _) = Address::find_program_address(&[b"ns_config"], &quasar_test_pda::ID);
 
     let init_config_ix: Instruction = InitNsConfigInstruction {
         payer,
@@ -1247,10 +1246,8 @@ fn test_typed_seed_deserialized_field() {
     assert_eq!(config_account.data[0], 9); // discriminator
 
     // Step 2: Create the ScopedItem using namespace as instruction arg seed
-    let (item_pda, _) = Address::find_program_address(
-        &[b"scoped", &namespace.to_le_bytes()],
-        &quasar_test_pda::ID,
-    );
+    let (item_pda, _) =
+        Address::find_program_address(&[b"scoped", &namespace.to_le_bytes()], &quasar_test_pda::ID);
 
     let init_item_ix: Instruction = InitScopedItemInstruction {
         payer,
@@ -1287,10 +1284,7 @@ fn test_typed_seed_deserialized_field() {
 
     let result3 = mollusk.process_instruction(
         &verify_ix,
-        &[
-            (config_pda, config_account),
-            (item_pda, item_account),
-        ],
+        &[(config_pda, config_account), (item_pda, item_account)],
     );
     assert!(
         result3.program_result.is_ok(),

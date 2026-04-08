@@ -13,10 +13,11 @@
 //! ## Security Note
 //!
 //! Arithmetic operators (`+`, `-`, `*`) use **wrapping** semantics in release
-//! builds. For security-sensitive calculations (balances, amounts, fees), always
-//! use [`PodU64::checked_add`], [`PodU64::checked_sub`], [`PodU64::checked_mul`],
-//! or [`PodU64::checked_div`] to detect overflow explicitly. Silent wrapping in
-//! financial logic can lead to exploitable underflow/overflow vulnerabilities.
+//! builds. For security-sensitive calculations (balances, amounts, fees),
+//! always use [`PodU64::checked_add`], [`PodU64::checked_sub`],
+//! [`PodU64::checked_mul`], or [`PodU64::checked_div`] to detect overflow
+//! explicitly. Silent wrapping in financial logic can lead to exploitable
+//! underflow/overflow vulnerabilities.
 
 #![no_std]
 
