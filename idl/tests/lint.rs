@@ -473,6 +473,48 @@ fn l006_writable_without_authority() {
 }
 
 // -------------------------------------------------------------------------
+// L009 — Cross-instruction unverified field
+// -------------------------------------------------------------------------
+
+#[test]
+fn cross_instruction_detects_unverified_field() {
+    let report = lint_source(r#"
+        declare_id!("11111111111111111111111111111111");
+        #[program]
+        mod p {
+            use super::*;
+            #[instruction(discriminator = [1])]
+            pub fn create(ctx: Ctx<Create>) -> Result<(), ProgramError> { Ok(()) }
+            #[instruction(discriminator = [2])]
+            pub fn execute(ctx: Ctx<Execute>) -> Result<(), ProgramError> { Ok(()) }
+        }
+        #[derive(Accounts)]
+        pub struct Create<'info> {
+            pub authority: Signer,
+            pub wallet: Account<Wallet<'info>>,
+            #[account(init, payer = authority, has_one = wallet)]
+            pub proposal: Account<Proposal<'info>>,
+        }
+        #[derive(Accounts)]
+        pub struct Execute<'info> {
+            pub authority: Signer,
+            #[account(mut)]
+            pub proposal: Account<Proposal<'info>>,
+        }
+        #[account(discriminator = 1)]
+        pub struct Proposal { pub wallet: Address }
+        #[account(discriminator = 2)]
+        pub struct Wallet { pub bump: u8 }
+    "#);
+    assert!(report.diagnostics.iter().any(|d| {
+        d.rule == LintRule::L009
+            && d.message.contains("Cross-instruction")
+            && d.message.contains("wallet")
+            && d.message.contains("execute")
+    }));
+}
+
+// -------------------------------------------------------------------------
 // Auto-fix
 // -------------------------------------------------------------------------
 
