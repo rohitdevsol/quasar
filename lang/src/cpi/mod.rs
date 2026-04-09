@@ -516,6 +516,11 @@ mod tests {
 
     #[test]
     fn cpi_account_from_view_matches_upstream_layout() {
+        // CpiAccount is 56 bytes: 6×u64 fields + 3 bool flags + 5 padding.
+        // Upstream's From impl leaves the 5 trailing padding bytes
+        // uninitialized, so only compare the first 51 meaningful bytes.
+        const CMP_LEN: usize = 51;
+
         for (is_signer, is_writable, executable) in [
             (false, false, false),
             (true, false, false),
@@ -538,7 +543,10 @@ mod tests {
             let upstream = CpiAccount::from(&view);
             let quasar = cpi_account_from_view(&view);
 
-            assert_eq!(cpi_account_bytes(&quasar), cpi_account_bytes(&upstream));
+            assert_eq!(
+                &cpi_account_bytes(&quasar)[..CMP_LEN],
+                &cpi_account_bytes(&upstream)[..CMP_LEN],
+            );
         }
     }
 }
