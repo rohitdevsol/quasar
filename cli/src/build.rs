@@ -6,6 +6,11 @@ mod lockfile;
 mod watch;
 
 pub(crate) use watch::watch_loop;
+/// platform-tools v1.52 ships Cargo 1.89 which supports Cargo.lock v4.
+/// v1.51 ships Cargo 1.84 which does not, causing "duplicate lang item" errors
+/// when its stale host-target artifacts conflict with the system toolchain.
+const PLATFORM_TOOLS_VERSION: &str = "v1.52";
+
 use {
     crate::{
         config::QuasarConfig,
@@ -55,7 +60,7 @@ fn run_once(debug: bool, features: Option<&str>, lint_flag: bool) -> CliResult {
 
     let output = if config.is_solana_toolchain() {
         let mut cmd = Command::new("cargo");
-        cmd.arg("build-sbf");
+        cmd.args(["build-sbf", "--tools-version", PLATFORM_TOOLS_VERSION]);
         if scoped {
             cmd.args(["--manifest-path", &manifest.to_string_lossy()]);
         }
@@ -178,7 +183,8 @@ pub fn profile_build() -> Result<PathBuf, crate::error::CliError> {
 
     let output = if config.is_solana_toolchain() {
         let mut cmd = Command::new("cargo");
-        cmd.arg("build-sbf").arg("--debug");
+        cmd.args(["build-sbf", "--tools-version", PLATFORM_TOOLS_VERSION]);
+        cmd.arg("--debug");
         if scoped {
             cmd.args(["--manifest-path", &manifest.to_string_lossy()]);
         }
