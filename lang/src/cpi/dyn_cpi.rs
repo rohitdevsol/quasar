@@ -279,50 +279,7 @@ mod tests {
         solana_address::Address,
     };
 
-    struct AccountBuffer {
-        inner: std::vec::Vec<u64>,
-    }
-
-    impl AccountBuffer {
-        fn new(data_len: usize) -> Self {
-            let byte_len =
-                core::mem::size_of::<RuntimeAccount>() + data_len + MAX_PERMITTED_DATA_INCREASE;
-            Self {
-                inner: (0..byte_len.div_ceil(8)).map(|_| 0u64).collect(),
-            }
-        }
-
-        fn raw(&mut self) -> *mut RuntimeAccount {
-            self.inner.as_mut_ptr() as *mut RuntimeAccount
-        }
-
-        fn init(
-            &mut self,
-            address: [u8; 32],
-            owner: [u8; 32],
-            data_len: usize,
-            is_signer: bool,
-            is_writable: bool,
-            executable: bool,
-        ) {
-            let raw = self.raw();
-            unsafe {
-                (*raw).borrow_state = NOT_BORROWED;
-                (*raw).is_signer = is_signer as u8;
-                (*raw).is_writable = is_writable as u8;
-                (*raw).executable = executable as u8;
-                (*raw).padding = [0u8; 4];
-                (*raw).address = Address::new_from_array(address);
-                (*raw).owner = Address::new_from_array(owner);
-                (*raw).lamports = 123;
-                (*raw).data_len = data_len as u64;
-            }
-        }
-
-        unsafe fn view(&mut self) -> AccountView {
-            AccountView::new_unchecked(self.raw())
-        }
-    }
+    use crate::cpi::tests::AccountBuffer;
 
     static PROGRAM_ID: Address = Address::new_from_array([0x11; 32]);
 

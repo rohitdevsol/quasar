@@ -433,12 +433,12 @@ mod tests {
         solana_account_view::{RuntimeAccount, MAX_PERMITTED_DATA_INCREASE, NOT_BORROWED},
     };
 
-    struct AccountBuffer {
+    pub(super) struct AccountBuffer {
         inner: std::vec::Vec<u64>,
     }
 
     impl AccountBuffer {
-        fn new(data_len: usize) -> Self {
+        pub(in crate::cpi) fn new(data_len: usize) -> Self {
             let byte_len =
                 core::mem::size_of::<RuntimeAccount>() + data_len + MAX_PERMITTED_DATA_INCREASE;
             Self {
@@ -446,11 +446,11 @@ mod tests {
             }
         }
 
-        fn raw(&mut self) -> *mut RuntimeAccount {
+        pub(in crate::cpi) fn raw(&mut self) -> *mut RuntimeAccount {
             self.inner.as_mut_ptr() as *mut RuntimeAccount
         }
 
-        fn init(
+        pub(in crate::cpi) fn init(
             &mut self,
             address: [u8; 32],
             owner: [u8; 32],
@@ -473,7 +473,7 @@ mod tests {
             }
         }
 
-        unsafe fn view(&mut self) -> AccountView {
+        pub(in crate::cpi) unsafe fn view(&mut self) -> AccountView {
             AccountView::new_unchecked(self.raw())
         }
     }

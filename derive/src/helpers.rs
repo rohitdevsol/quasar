@@ -611,7 +611,9 @@ fn parse_prefix_type(ty: &Type) -> Option<PrefixType> {
 pub(crate) fn classify_dynamic_string(ty: &Type) -> Option<(PrefixType, usize)> {
     if let Type::Path(type_path) = ty {
         if let Some(seg) = type_path.path.segments.last() {
-            if seg.ident == "String" {
+            // Only match unqualified `String` (the Quasar import), not
+            // `std::string::String` or `my_crate::String`.
+            if seg.ident == "String" && type_path.path.segments.len() == 1 {
                 return match &seg.arguments {
                     PathArguments::None => Some((PrefixType::U32, 1024)),
                     PathArguments::AngleBracketed(args) => {
@@ -655,7 +657,7 @@ pub(crate) fn classify_dynamic_string(ty: &Type) -> Option<(PrefixType, usize)> 
 pub(crate) fn classify_dynamic_vec(ty: &Type) -> Option<(Type, PrefixType, usize)> {
     if let Type::Path(type_path) = ty {
         if let Some(seg) = type_path.path.segments.last() {
-            if seg.ident == "Vec" {
+            if seg.ident == "Vec" && type_path.path.segments.len() == 1 {
                 if let PathArguments::AngleBracketed(args) = &seg.arguments {
                     let mut iter = args.args.iter();
                     let first = iter.next()?;
