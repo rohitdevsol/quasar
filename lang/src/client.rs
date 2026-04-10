@@ -272,7 +272,10 @@ where
 
     fn write(mut writer: impl Writer, src: &Self) -> WriteResult<()> {
         let bytes = unsafe {
-            core::slice::from_raw_parts(src as *const Self as *const u8, core::mem::size_of::<Self>())
+            core::slice::from_raw_parts(
+                src as *const Self as *const u8,
+                core::mem::size_of::<Self>(),
+            )
         };
         writer.write(bytes)?;
         Ok(())
@@ -287,8 +290,8 @@ where
 
     fn read(mut reader: impl Reader<'de>, dst: &mut MaybeUninit<Self>) -> ReadResult<()> {
         let bytes = reader.take_scoped(core::mem::size_of::<Self>())?;
-        // SAFETY: OptionZc<Z> is #[repr(C)] with alignment 1 (tag: u8 + MaybeUninit<Z>).
-        // The bytes from the reader are fully initialized.
+        // SAFETY: OptionZc<Z> is #[repr(C)] with alignment 1 (tag: u8 +
+        // MaybeUninit<Z>). The bytes from the reader are fully initialized.
         let zc = unsafe { core::ptr::read_unaligned(bytes.as_ptr() as *const Self) };
         dst.write(zc);
         Ok(())

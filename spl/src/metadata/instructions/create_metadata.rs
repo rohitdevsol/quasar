@@ -43,11 +43,7 @@ pub fn create_metadata_accounts_v3<'a>(
     cpi.push_account(mint, false, false)?;
     cpi.push_account(mint_authority, true, false)?;
     cpi.push_account(payer, true, true)?;
-    cpi.push_account(
-        update_authority,
-        update_authority_is_signer,
-        false,
-    )?;
+    cpi.push_account(update_authority, update_authority_is_signer, false)?;
     cpi.push_account(system_program, false, false)?;
     cpi.push_account(rent, false, false)?;
 

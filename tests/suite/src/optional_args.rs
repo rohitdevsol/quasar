@@ -16,7 +16,11 @@ fn option_u64_some_happy() {
     }
     .into();
     let result = svm.process_instruction(&ix, &[signer_account(signer)]);
-    assert!(result.is_ok(), "Option<u64> Some(42): {:?}", result.raw_result);
+    assert!(
+        result.is_ok(),
+        "Option<u64> Some(42): {:?}",
+        result.raw_result
+    );
 }
 
 #[test]
@@ -56,20 +60,24 @@ fn option_address_some_happy() {
     }
     .into();
     let result = svm.process_instruction(&ix, &[signer_account(signer)]);
-    assert!(result.is_ok(), "Option<Address> Some: {:?}", result.raw_result);
+    assert!(
+        result.is_ok(),
+        "Option<Address> Some: {:?}",
+        result.raw_result
+    );
 }
 
 #[test]
 fn option_address_none_happy() {
     let mut svm = svm_misc();
     let signer = Pubkey::new_unique();
-    let ix: Instruction = OptionAddressNoneInstruction {
-        signer,
-        addr: None,
-    }
-    .into();
+    let ix: Instruction = OptionAddressNoneInstruction { signer, addr: None }.into();
     let result = svm.process_instruction(&ix, &[signer_account(signer)]);
-    assert!(result.is_ok(), "Option<Address> None: {:?}", result.raw_result);
+    assert!(
+        result.is_ok(),
+        "Option<Address> None: {:?}",
+        result.raw_result
+    );
 }
 
 // Adversarial test: manually craft instruction data with tag=2 (invalid)
@@ -105,7 +113,10 @@ fn option_u64_tag_0xff_rejected() {
         data,
     };
     let result = svm.process_instruction(&ix, &[signer_account(signer)]);
-    assert!(result.is_err(), "tag=0xFF should be rejected by validate_zc");
+    assert!(
+        result.is_err(),
+        "tag=0xFF should be rejected by validate_zc"
+    );
 }
 
 // Adversarial test: truncated instruction data (disc only, no Option payload)

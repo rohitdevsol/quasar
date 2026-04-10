@@ -47,7 +47,8 @@ pub struct DynCpiCall<'a, const MAX_ACCTS: usize, const MAX_DATA: usize> {
 
 impl<'a, const MAX_ACCTS: usize, const MAX_DATA: usize> DynCpiCall<'a, MAX_ACCTS, MAX_DATA> {
     // Compile-time stack overflow guard — fires at monomorphization time.
-    // InstructionAccount is 24 bytes, CpiAccount is 56 bytes, plus data + bookkeeping.
+    // InstructionAccount is 24 bytes, CpiAccount is 56 bytes, plus data +
+    // bookkeeping.
     const _STACK_CHECK: () = assert!(
         56 * MAX_ACCTS + 24 * MAX_ACCTS + MAX_DATA + 24 <= 3072,
         "DynCpiCall exceeds safe 3 KiB stack budget for SVM 4 KiB frames"
@@ -57,6 +58,7 @@ impl<'a, const MAX_ACCTS: usize, const MAX_DATA: usize> DynCpiCall<'a, MAX_ACCTS
     #[inline(always)]
     pub fn new(program_id: &'a Address) -> Self {
         // Force compile-time stack size check.
+        #[allow(clippy::let_unit_value)]
         let _ = Self::_STACK_CHECK;
         Self {
             program_id,

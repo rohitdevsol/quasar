@@ -262,27 +262,41 @@ mod quasar_test_misc {
     }
 
     #[instruction(discriminator = 52)]
-    pub fn option_u64_some(ctx: Ctx<OptionU64Some>, value: Option<u64>) -> Result<(), ProgramError> {
+    pub fn option_u64_some(
+        ctx: Ctx<OptionU64Some>,
+        value: Option<u64>,
+    ) -> Result<(), ProgramError> {
         ctx.accounts.handler(value)
     }
 
     #[instruction(discriminator = 53)]
-    pub fn option_u64_none(ctx: Ctx<OptionU64None>, value: Option<u64>) -> Result<(), ProgramError> {
+    pub fn option_u64_none(
+        ctx: Ctx<OptionU64None>,
+        value: Option<u64>,
+    ) -> Result<(), ProgramError> {
         ctx.accounts.handler(value)
     }
 
     #[instruction(discriminator = 54)]
-    pub fn option_address_some(ctx: Ctx<OptionAddressSome>, addr: Option<Address>) -> Result<(), ProgramError> {
+    pub fn option_address_some(
+        ctx: Ctx<OptionAddressSome>,
+        addr: Option<Address>,
+    ) -> Result<(), ProgramError> {
         ctx.accounts.handler(addr)
     }
 
     #[instruction(discriminator = 55)]
-    pub fn option_address_none(ctx: Ctx<OptionAddressNone>, addr: Option<Address>) -> Result<(), ProgramError> {
+    pub fn option_address_none(
+        ctx: Ctx<OptionAddressNone>,
+        addr: Option<Address>,
+    ) -> Result<(), ProgramError> {
         ctx.accounts.handler(addr)
     }
 
     #[instruction(discriminator = 56)]
-    pub fn interface_migration_check(ctx: Ctx<InterfaceMigrationCheck>) -> Result<(), ProgramError> {
+    pub fn interface_migration_check(
+        ctx: Ctx<InterfaceMigrationCheck>,
+    ) -> Result<(), ProgramError> {
         ctx.accounts.handler()
     }
 }

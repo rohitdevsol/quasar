@@ -39,9 +39,18 @@ fn vault_v1_accepted() {
     let ix: Instruction = InterfaceMigrationCheckInstruction { vault }.into();
     let result = svm.process_instruction(
         &ix,
-        &[raw_account(vault, 1_000_000, vault_v1_data(authority, 100), program_id())],
+        &[raw_account(
+            vault,
+            1_000_000,
+            vault_v1_data(authority, 100),
+            program_id(),
+        )],
     );
-    assert!(result.is_ok(), "VaultV1 should be accepted: {:?}", result.raw_result);
+    assert!(
+        result.is_ok(),
+        "VaultV1 should be accepted: {:?}",
+        result.raw_result
+    );
 }
 
 #[test]
@@ -52,9 +61,18 @@ fn vault_v2_accepted() {
     let ix: Instruction = InterfaceMigrationCheckInstruction { vault }.into();
     let result = svm.process_instruction(
         &ix,
-        &[raw_account(vault, 1_000_000, vault_v2_data(authority, 100, 50), program_id())],
+        &[raw_account(
+            vault,
+            1_000_000,
+            vault_v2_data(authority, 100, 50),
+            program_id(),
+        )],
     );
-    assert!(result.is_ok(), "VaultV2 should be accepted: {:?}", result.raw_result);
+    assert!(
+        result.is_ok(),
+        "VaultV2 should be accepted: {:?}",
+        result.raw_result
+    );
 }
 
 // =========================================================================
@@ -70,7 +88,12 @@ fn wrong_owner_rejected() {
     let ix: Instruction = InterfaceMigrationCheckInstruction { vault }.into();
     let result = svm.process_instruction(
         &ix,
-        &[raw_account(vault, 1_000_000, vault_v1_data(authority, 100), wrong_owner)],
+        &[raw_account(
+            vault,
+            1_000_000,
+            vault_v1_data(authority, 100),
+            wrong_owner,
+        )],
     );
     assert!(result.is_err(), "wrong owner should be rejected");
 }
@@ -82,10 +105,7 @@ fn wrong_discriminator_rejected() {
     let mut data = vec![0u8; 49];
     data[0] = 99; // neither 20 nor 21
     let ix: Instruction = InterfaceMigrationCheckInstruction { vault }.into();
-    let result = svm.process_instruction(
-        &ix,
-        &[raw_account(vault, 1_000_000, data, program_id())],
-    );
+    let result = svm.process_instruction(&ix, &[raw_account(vault, 1_000_000, data, program_id())]);
     assert!(result.is_err(), "unknown discriminator should be rejected");
 }
 
@@ -96,10 +116,7 @@ fn v1_data_too_small_rejected() {
     let mut data = vec![0u8; 20]; // too small for VaultV1 (needs 41)
     data[0] = 20;
     let ix: Instruction = InterfaceMigrationCheckInstruction { vault }.into();
-    let result = svm.process_instruction(
-        &ix,
-        &[raw_account(vault, 1_000_000, data, program_id())],
-    );
+    let result = svm.process_instruction(&ix, &[raw_account(vault, 1_000_000, data, program_id())]);
     assert!(result.is_err(), "undersized VaultV1 should be rejected");
 }
 
@@ -111,9 +128,6 @@ fn v2_data_too_small_rejected() {
     let mut data = vec![0u8; 41];
     data[0] = 21;
     let ix: Instruction = InterfaceMigrationCheckInstruction { vault }.into();
-    let result = svm.process_instruction(
-        &ix,
-        &[raw_account(vault, 1_000_000, data, program_id())],
-    );
+    let result = svm.process_instruction(&ix, &[raw_account(vault, 1_000_000, data, program_id())]);
     assert!(result.is_err(), "undersized VaultV2 should be rejected");
 }

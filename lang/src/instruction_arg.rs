@@ -361,7 +361,10 @@ mod tests {
                 tag,
                 value: core::mem::MaybeUninit::new(crate::pod::PodU64::from(0)),
             };
-            assert!(Option::<u64>::validate_zc(&zc).is_ok(), "tag={tag} should be valid");
+            assert!(
+                Option::<u64>::validate_zc(&zc).is_ok(),
+                "tag={tag} should be valid"
+            );
         }
         // Tags 2..=255 are invalid
         for tag in 2..=255u8 {
@@ -369,7 +372,10 @@ mod tests {
                 tag,
                 value: core::mem::MaybeUninit::new(crate::pod::PodU64::from(0)),
             };
-            assert!(Option::<u64>::validate_zc(&zc).is_err(), "tag={tag} should be invalid");
+            assert!(
+                Option::<u64>::validate_zc(&zc).is_err(),
+                "tag={tag} should be invalid"
+            );
         }
     }
 }

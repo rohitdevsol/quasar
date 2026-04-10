@@ -1,6 +1,6 @@
 use {
     crate::helpers::*,
-    quasar_svm::{InstructionError, Instruction, Pubkey},
+    quasar_svm::{Instruction, InstructionError, Pubkey},
     quasar_test_heap::cpi::*,
 };
 
@@ -36,9 +36,10 @@ fn no_heap_alloc_aborts() {
     let signer = Pubkey::new_unique();
     let ix: Instruction = NoHeapAllocAttemptInstruction { signer }.into();
     let result = svm.process_instruction(&ix, &[signer_account(signer)]);
-    // Non-heap endpoint attempts vec![1u8; 64]. In release builds (no debug feature),
-    // the heap cursor is set past end of heap, so alloc returns null, triggering abort.
-    // The exact error code depends on SVM handling of abort_program().
+    // Non-heap endpoint attempts vec![1u8; 64]. In release builds (no debug
+    // feature), the heap cursor is set past end of heap, so alloc returns null,
+    // triggering abort. The exact error code depends on SVM handling of
+    // abort_program().
     assert_eq!(
         result.raw_result,
         Err(InstructionError::ProgramFailedToComplete),

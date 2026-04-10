@@ -1,7 +1,4 @@
-use {
-    crate::prelude::*,
-    core::marker::PhantomData,
-};
+use {crate::prelude::*, core::marker::PhantomData};
 
 /// Shared owner check -- called by both `from_account_view` and
 /// `from_account_view_mut`.

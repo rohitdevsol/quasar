@@ -26,8 +26,9 @@ mod quasar_test_heap {
 
     /// Non-heap instruction that attempts allocation.
     /// In release builds (no debug feature): cursor is set past end of heap,
-    /// alloc returns null, handle_alloc_error triggers panic_handler, program aborts.
-    /// In debug builds: cursor is initialized normally, alloc succeeds.
+    /// alloc returns null, handle_alloc_error triggers panic_handler, program
+    /// aborts. In debug builds: cursor is initialized normally, alloc
+    /// succeeds.
     #[instruction(discriminator = 2)]
     pub fn no_heap_alloc_attempt(ctx: Ctx<NoHeapAllocAttempt>) -> Result<(), ProgramError> {
         ctx.accounts.handler()
