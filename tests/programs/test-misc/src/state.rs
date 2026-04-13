@@ -78,13 +78,13 @@ pub struct SmallPrefixAccount {
 }
 
 #[account(discriminator = 8)]
-pub struct TailStrAccount {
+pub struct DynStrAccount {
     pub authority: Address,
     pub label: String<255>,
 }
 
 #[account(discriminator = 9)]
-pub struct TailBytesAccount {
+pub struct DynBytesAccount {
     pub authority: Address,
     pub data: Vec<u8, 1024>,
 }

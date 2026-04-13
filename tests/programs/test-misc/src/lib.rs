@@ -179,13 +179,13 @@ mod quasar_test_misc {
     }
 
     #[instruction(discriminator = 28)]
-    pub fn tail_str_check(ctx: Ctx<TailStrCheck>, expected_len: u8) -> Result<(), ProgramError> {
+    pub fn dyn_str_check(ctx: Ctx<DynStrCheck>, expected_len: u8) -> Result<(), ProgramError> {
         ctx.accounts.handler(expected_len)
     }
 
     #[instruction(discriminator = 29)]
-    pub fn tail_bytes_check(
-        ctx: Ctx<TailBytesCheck>,
+    pub fn dyn_bytes_check(
+        ctx: Ctx<DynBytesCheck>,
         expected_len: u8,
     ) -> Result<(), ProgramError> {
         ctx.accounts.handler(expected_len)
