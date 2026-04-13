@@ -27,7 +27,9 @@ impl DynamicStackCache {
         );
 
         // Mutate dynamic field on stack (free — no memmove, no realloc)
-        guard.name.set(new_name);
+        if !guard.name.set(new_name) {
+            return Err(ProgramError::InvalidInstructionData);
+        }
 
         // guard drops here → auto-save flushes to account data
         Ok(())

@@ -21,7 +21,9 @@ impl DynamicMutate {
             rent.lamports_per_byte(),
             rent.exemption_threshold_raw(),
         );
-        guard.name.set(new_name);
+        if !guard.name.set(new_name) {
+            return Err(ProgramError::InvalidInstructionData);
+        }
         // guard drops → auto-save
         Ok(())
     }

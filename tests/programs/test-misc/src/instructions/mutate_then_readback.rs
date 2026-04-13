@@ -24,7 +24,9 @@ impl MutateThenReadback {
                 rent.lamports_per_byte(),
                 rent.exemption_threshold_raw(),
             );
-            guard.name.set(new_name);
+            if !guard.name.set(new_name) {
+                return Err(ProgramError::InvalidInstructionData);
+            }
         } // guard dropped here → flushed to account data
 
         // Read back from account data to verify the save worked

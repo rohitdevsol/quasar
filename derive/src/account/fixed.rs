@@ -671,11 +671,22 @@ pub(super) fn generate_account(
                     rent_lpb: u64,
                     rent_threshold: u64,
                 ) -> #guard_name<'a> {
-                    let __data = unsafe { self.__view.borrow_unchecked() };
-                    let mut __off = #disc_len + core::mem::size_of::<#zc_name>();
-                    #(#load_stmts)*
-                    let _ = __off;
-                    // SAFETY: #name is #[repr(transparent)] over AccountView.
+                    let (#(#field_names,)*) = {
+                        let __data = unsafe { self.__view.borrow_unchecked() };
+                        let mut __off = #disc_len + core::mem::size_of::<#zc_name>();
+                        #(#load_stmts)*
+                        let _ = __off;
+                        (#(#field_names,)*)
+                        // __data is definitively dropped here — no shared borrow
+                        // of self.__view is live past this point.
+                    };
+                    // SAFETY: `__data` (the shared borrow of `self.__view`) was
+                    // dropped at the end of the enclosing block. No shared reference
+                    // to `self.__view` is live at this point. The raw-pointer reborrow
+                    // produces a `&mut AccountView` from `&mut self` which is the
+                    // unique owner — no aliasing occurs. `#name` is
+                    // `#[repr(transparent)]` over `AccountView` so the cast is
+                    // layout-compatible.
                     let __view = unsafe { &mut *(&mut self.__view as *mut AccountView) };
                     #guard_name {
                         __view,
