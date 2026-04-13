@@ -136,6 +136,52 @@ impl<const N: usize> PodString<N> {
         true
     }
 
+    /// Append `value` to the string. Returns `false` if remaining capacity
+    /// is insufficient.
+    #[must_use = "returns false if appending would exceed capacity — unhandled means the append \
+                  was silently skipped"]
+    #[inline(always)]
+    pub fn push_str(&mut self, value: &str) -> bool {
+        let cur = self.len();
+        let vlen = value.len();
+        // Overflow-safe: `cur <= N` is a struct invariant, so `N - cur` cannot
+        // wrap.
+        if vlen > N - cur {
+            return false;
+        }
+        let new_len = cur + vlen;
+        // SAFETY: `new_len <= N` verified above. The destination range
+        // `data[cur..new_len]` is within the N-byte capacity. Source and
+        // destination are in different allocations (stack vs str), so they
+        // cannot overlap.
+        unsafe {
+            core::ptr::copy_nonoverlapping(
+                value.as_ptr(),
+                (self.data.as_mut_ptr() as *mut u8).add(cur),
+                vlen,
+            );
+        }
+        self.len = new_len as u8;
+        true
+    }
+
+    /// Shorten the string to `new_len` bytes. No-op if `new_len >= len()`.
+    ///
+    /// # Panics
+    ///
+    /// Panics in debug builds if `new_len` is not on a UTF-8 character
+    /// boundary.
+    #[inline(always)]
+    pub fn truncate(&mut self, new_len: usize) {
+        if new_len < self.len() {
+            debug_assert!(
+                self.as_str().is_char_boundary(new_len),
+                "truncate: new_len is not on a UTF-8 character boundary"
+            );
+            self.len = new_len as u8;
+        }
+    }
+
     /// Clear the string (set length to 0).
     #[inline(always)]
     pub fn clear(&mut self) {
@@ -514,5 +560,57 @@ mod tests {
         let consumed = s.load_from_bytes(&bytes);
         assert_eq!(consumed, 6);
         assert_eq!(s.as_str(), "café");
+    }
+
+    #[test]
+    fn push_str_basic() {
+        let mut s = PodString::<10>::default();
+        assert!(s.set("hello"));
+        assert!(s.push_str(" world"[..5].as_ref())); // " worl" — fits exactly
+                                                     // "hello" (5) + " worl" (5) = 10 = N
+        assert_eq!(s.len(), 10);
+        assert_eq!(s.as_str(), "hello worl");
+    }
+
+    #[test]
+    fn push_str_exceeds_capacity() {
+        let mut s = PodString::<8>::default();
+        assert!(s.set("hello"));
+        // "hello" (5) + " world" (6) = 11 > 8
+        assert!(!s.push_str(" world"));
+        // Original content unchanged
+        assert_eq!(s.as_str(), "hello");
+    }
+
+    #[test]
+    fn push_str_empty() {
+        let mut s = PodString::<10>::default();
+        assert!(s.set("hi"));
+        assert!(s.push_str(""));
+        assert_eq!(s.as_str(), "hi");
+    }
+
+    #[test]
+    fn truncate_basic() {
+        let mut s = PodString::<32>::default();
+        assert!(s.set("hello world"));
+        s.truncate(5);
+        assert_eq!(s.as_str(), "hello");
+    }
+
+    #[test]
+    fn truncate_noop_when_longer() {
+        let mut s = PodString::<32>::default();
+        assert!(s.set("hello"));
+        s.truncate(10); // new_len > len() — no-op
+        assert_eq!(s.as_str(), "hello");
+    }
+
+    #[test]
+    fn truncate_to_zero() {
+        let mut s = PodString::<32>::default();
+        assert!(s.set("hello"));
+        s.truncate(0);
+        assert!(s.is_empty());
     }
 }

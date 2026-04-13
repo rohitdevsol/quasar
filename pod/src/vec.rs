@@ -406,6 +406,13 @@ impl<T: Copy, const N: usize> AsRef<[T]> for PodVec<T, N> {
     }
 }
 
+impl<T: Copy, const N: usize> AsMut<[T]> for PodVec<T, N> {
+    #[inline(always)]
+    fn as_mut(&mut self) -> &mut [T] {
+        self.as_slice_mut()
+    }
+}
+
 impl<T: Copy + PartialEq, const N: usize> PartialEq for PodVec<T, N> {
     #[inline(always)]
     fn eq(&self, other: &Self) -> bool {
@@ -600,6 +607,15 @@ mod tests {
         assert!(v.set_from_slice(&[1, 2, 3]));
         assert_eq!(v, [1u8, 2, 3].as_slice());
         assert_eq!(v, &[1u8, 2, 3][..]);
+    }
+
+    #[test]
+    fn as_mut_slice() {
+        let mut v = PodVec::<u8, 4>::default();
+        assert!(v.set_from_slice(&[1, 2, 3]));
+        let s: &mut [u8] = v.as_mut();
+        s[0] = 99;
+        assert_eq!(v.as_slice(), &[99, 2, 3]);
     }
 
     #[test]
